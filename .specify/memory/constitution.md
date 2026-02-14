@@ -1,50 +1,118 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+  Sync Impact Report
+  ===================
+  Version change: 0.0.0 -> 1.0.0 (MAJOR — первичное принятие)
+  Modified principles: нет (первичное создание)
+  Added sections:
+    - I. Code Quality
+    - II. Testing Standards
+    - III. User Experience Consistency
+    - IV. Performance Requirements
+    - Development Workflow
+    - Quality Gates
+    - Governance
+  Removed sections: нет
+  Templates requiring updates:
+    - .specify/templates/plan-template.md — ✅ совместим (Constitution Check
+      секция уже предусмотрена, принципы подставляются при генерации плана)
+    - .specify/templates/spec-template.md — ✅ совместим (Success Criteria
+      и Requirements секции покрывают принципы производительности и UX)
+    - .specify/templates/tasks-template.md — ✅ совместим (Polish phase
+      включает тесты, производительность, документацию)
+  Follow-up TODOs: нет
+-->
+
+# Swim Bot Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Code Quality
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Код ДОЛЖЕН быть читаемым, поддерживаемым и безопасным.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- Каждая функция — docstring с назначением, параметрами и возвращаемым
+  значением
+- Линтеры (ruff, mypy) ДОЛЖНЫ проходить без ошибок перед каждым коммитом
+- Импорты — только в начале файла (исключение: циклические зависимости)
+- Rule of Three: извлечение в отдельную функцию только при 3+ повторениях
+- Комментарии фокусируются на «почему», а не «что» — код говорит сам за себя
+- ЗАПРЕЩЕНО оставлять закомментированный код — удалять или выносить
+  в отдельную ветку
+- Типизация: все публичные функции ДОЛЖНЫ иметь аннотации типов
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Testing Standards
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Тесты — обязательная часть каждой функциональности.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+- Каждая новая функция ДОЛЖНА сопровождаться тестами
+- Структура тестов: `tests/unit/`, `tests/integration/`
+- Unit-тесты покрывают отдельные функции и классы изолированно
+- Интеграционные тесты проверяют взаимодействие компонентов
+- Тесты ДОЛЖНЫ проходить локально перед коммитом
+- Имена тестов описывают сценарий: `test_<что>_<при_каких_условиях>_<ожидание>`
+- Тестовые данные — фикстуры и фабрики, ЗАПРЕЩЕНО хардкодить в теле теста
+- При исправлении бага — сначала тест, воспроизводящий баг, затем фикс
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. User Experience Consistency
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Взаимодействие с пользователем ДОЛЖНО быть предсказуемым и единообразным.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- Все сообщения пользователю — на русском языке
+- Формат ошибок единообразен: понятное описание + подсказка по исправлению
+- Команды и интерфейсы следуют единому стилю именования
+- Обратная связь на каждое действие пользователя — подтверждение или
+  сообщение об ошибке, молчаливые отказы ЗАПРЕЩЕНЫ
+- Конфигурация через единый механизм (env-переменные или конфиг-файл),
+  без разбросанных захардкоженных значений
+- Логирование пользовательских действий для отладки — structured logging
+
+### IV. Performance Requirements
+
+Производительность ДОЛЖНА учитываться при проектировании, а не как
+запоздалая оптимизация.
+
+- Сетевые запросы ДОЛЖНЫ иметь таймауты (по умолчанию 30 секунд)
+- Длительные операции ДОЛЖНЫ выполняться асинхронно и показывать прогресс
+- ЗАПРЕЩЕНЫ блокирующие вызовы в асинхронном коде
+- Кэширование данных, которые запрашиваются повторно, — обязательно
+- Потребление памяти: обработка данных потоково (streaming/generators)
+  при работе с большими объёмами
+- При добавлении внешних зависимостей — оценка влияния на время старта
+
+## Development Workflow
+
+Процесс разработки обеспечивает качество на каждом этапе.
+
+- Ветвление: feature-ветки от main, merge через PR
+- Перед коммитом: линтеры + тесты ДОЛЖНЫ проходить
+- Code review обязателен для изменений в основной логике
+- Документация обновляется синхронно с кодом — не после релиза
+- Коммиты атомарные: одно логическое изменение = один коммит
+
+## Quality Gates
+
+Контрольные точки, блокирующие прогресс при несоответствии.
+
+- **Gate 1 — Lint**: ruff check + mypy ДОЛЖНЫ проходить без ошибок
+- **Gate 2 — Tests**: все тесты (unit + integration) ДОЛЖНЫ быть зелёными
+- **Gate 3 — Coverage**: новый код ДОЛЖЕН быть покрыт тестами
+  (без числового порога — покрытие проверяется при review)
+- **Gate 4 — Docs**: публичный API ДОЛЖЕН иметь актуальную документацию
+- **Gate 5 — Performance**: отсутствие блокирующих вызовов в async-коде,
+  наличие таймаутов на внешние запросы
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+Конституция — главный документ проекта. Все практики разработки
+ДОЛЖНЫ соответствовать изложенным принципам.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+- Изменения конституции требуют: обоснование, обновление версии,
+  ревизию зависимых шаблонов
+- Версионирование: MAJOR (удаление/переопределение принципов),
+  MINOR (добавление принципов/секций), PATCH (уточнения формулировок)
+- Compliance review: при каждом code review проверяется соответствие
+  принципам конституции
+- Любое исключение из принципов ДОЛЖНО быть задокументировано
+  с обоснованием в Complexity Tracking (plan.md)
+
+**Version**: 1.0.0 | **Ratified**: 2026-02-15 | **Last Amended**: 2026-02-15
