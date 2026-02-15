@@ -36,9 +36,13 @@ func (b *Bot) detectContext(chatID, userID int64, msg *tele.Message, cfg *storag
 
 // spamResult содержит результат обработки спам-сообщения.
 type spamResult struct {
-	Action    storage.SpamAction
-	Remaining int    // оставшиеся попытки
-	Message   string // текстовое сообщение для чата
+	Action      storage.SpamAction
+	Remaining   int    // оставшиеся попытки
+	Count       int    // текущий счётчик (сколько раз сработало)
+	Limit       int    // лимит попыток
+	RBSpamCount int    // спам-записей от других в ring buffer
+	RBThreshold int    // порог для reactive
+	Message     string // текстовое сообщение для чата
 }
 
 // processSpam обрабатывает спам-сообщение: обновляет счётчик и определяет действие.
@@ -131,11 +135,14 @@ func (b *Bot) processSpamNew(chatID, userID int64, msg *tele.Message, cfg *stora
 
 	// уже ограничен ранее — пропускаем (не нужен повторный restrict)
 	if counter.Kicked {
-		return &spamResult{Action: storage.ActionRestrict}, nil
+		return &spamResult{Action: storage.ActionRestrict, Count: counter.Count, Limit: counter.EffectiveLimit}, nil
 	}
 
-	// определяем контекст
+	// определяем контекст + получаем rb stats
 	ctx := b.detectContextNew(chatID, userID, cfg)
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rbSpamCount := rb.SpamCountByOthers(userID)
+	rbThreshold := cfg.RingBufferThreshold
 
 	// consume 1 попытку
 	counter, err = b.storage.IncrementSpamCounter(chatID, userID)
@@ -157,17 +164,25 @@ func (b *Bot) processSpamNew(chatID, userID int64, msg *tele.Message, cfg *stora
 		if remaining <= 0 {
 			// FR-008: штраф + лимит исчерпан
 			return &spamResult{
-				Action:    storage.ActionRestrict,
-				Remaining: 0,
-				Message:   "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
+				Action:      storage.ActionRestrict,
+				Remaining:   0,
+				Count:       counter.Count,
+				Limit:       counter.EffectiveLimit,
+				RBSpamCount: rbSpamCount,
+				RBThreshold: rbThreshold,
+				Message:     "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
 			}, nil
 		}
 
 		// FR-007: штраф, ещё есть попытки
 		return &spamResult{
-			Action:    storage.ActionWarning,
-			Remaining: remaining,
-			Message:   "Группами плавать нежелательно, ворую попытку, осталось: " + itoa(remaining),
+			Action:      storage.ActionWarning,
+			Remaining:   remaining,
+			Count:       counter.Count,
+			Limit:       counter.EffectiveLimit,
+			RBSpamCount: rbSpamCount,
+			RBThreshold: rbThreshold,
+			Message:     "Группами плавать нежелательно, ворую попытку, осталось: " + itoa(remaining),
 		}, nil
 	}
 
@@ -176,17 +191,25 @@ func (b *Bot) processSpamNew(chatID, userID int64, msg *tele.Message, cfg *stora
 	case remaining <= 0:
 		// FR-009 / FR-004: лимит исчерпан -> restrict
 		return &spamResult{
-			Action:    storage.ActionRestrict,
-			Remaining: 0,
-			Message:   "Все, на сегодня наплавались",
+			Action:      storage.ActionRestrict,
+			Remaining:   0,
+			Count:       counter.Count,
+			Limit:       counter.EffectiveLimit,
+			RBSpamCount: rbSpamCount,
+			RBThreshold: rbThreshold,
+			Message:     "Все, на сегодня наплавались",
 		}, nil
 
 	default:
 		// ещё есть попытки — предупреждение
 		return &spamResult{
-			Action:    storage.ActionWarning,
-			Remaining: remaining,
-			Message:   formatRemaining(remaining),
+			Action:      storage.ActionWarning,
+			Remaining:   remaining,
+			Count:       counter.Count,
+			Limit:       counter.EffectiveLimit,
+			RBSpamCount: rbSpamCount,
+			RBThreshold: rbThreshold,
+			Message:     formatRemaining(remaining),
 		}, nil
 	}
 }

@@ -113,6 +113,7 @@ func (b *Bot) registerHandlers() {
 	privateGroup.Handle("/stats", b.handleStats)
 	privateGroup.Handle("/testmode", b.handleTestMode)
 	privateGroup.Handle("/delsticker", b.handleDelSticker)
+	privateGroup.Handle("/resetcounters", b.handleResetCounters)
 
 	// все типы сообщений — единый роутер: приватные стикеры -> /setsticker flow, групповые -> спам-детекция
 	for _, event := range []string{tele.OnText, tele.OnPhoto, tele.OnDocument, tele.OnSticker, tele.OnVideo, tele.OnAnimation} {

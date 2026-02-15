@@ -45,9 +45,22 @@ func (b *Bot) handleHelp(c tele.Context) error {
 Отслеживать стикерпак (стикеры из него = спам).
 Пример: /setstickerpack -100123456789 AnimatedEmojis
 
-/setlimits <chat_id> [daily=N] [reactive=N] [window=N]
-Настроить лимиты спам-сообщений в день.
+/setlimits <chat_id> [daily=N] [reactive=N] [window=N] [rb_size=N] [rb_threshold=N]
+Настроить лимиты. rb_size и rb_threshold — для тестового режима.
 Пример: /setlimits -100123456789 daily=6 reactive=2 window=10
+
+/delsticker <chat_id>
+Удалить стикер из настроек чата.
+Пример: /delsticker -100123456789
+
+/testmode <chat_id> on|off
+Включить/выключить тестовый режим (новая логика: ring buffer, restrict, штраф).
+Админы в тестовом режиме обрабатываются как обычные пользователи.
+Пример: /testmode -100123456789 on
+
+/resetcounters <chat_id>
+Сбросить все спам-счётчики за сегодня (только в тестовом режиме).
+Пример: /resetcounters -100123456789
 
 /stats <chat_id>
 Показать статистику срабатываний.
@@ -61,7 +74,7 @@ func (b *Bot) handleHelp(c tele.Context) error {
 Как это работает:
 1. Добавь меня в чат как администратора
 2. Настрой /setbot и /setsticker
-3. Пользователь спамит -> предупреждения -> стикер + кик`
+3. Пользователь спамит -> предупреждения -> restrict до конца дня`
 
 	return c.Send(msg)
 }
@@ -478,6 +491,48 @@ func (b *Bot) handleDelSticker(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Стикер удалён для чата %d", chatID))
 }
 
+// handleResetCounters обрабатывает команду /resetcounters <chat_id>.
+// Сбрасывает все спам-счётчики за сегодня. Работает только в тестовом режиме.
+func (b *Bot) handleResetCounters(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("Формат: /resetcounters <chat_id>")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id.")
+	}
+
+	// проверка прав администратора
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("resetcounters admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	// проверяем что чат в тестовом режиме
+	cfg, err := b.storage.GetChatConfig(chatID)
+	if err != nil {
+		return c.Send("Чат не настроен.")
+	}
+	if !cfg.TestMode {
+		return c.Send("Сброс счётчиков доступен только в тестовом режиме.")
+	}
+
+	affected, err := b.storage.ResetSpamCounters(chatID)
+	if err != nil {
+		b.logger.Error("reset counters failed", "chat_id", chatID, "error", err)
+		return c.Send("Не удалось сбросить счётчики.")
+	}
+
+	b.logger.Info("counters reset", "chat_id", chatID, "affected", affected, "by_user", c.Sender().ID)
+	return c.Send(fmt.Sprintf("Сброшено %d счётчиков для чата %d", affected, chatID))
+}
+
 // handleMessage — единый роутер для всех типов сообщений.
 // Приватные стикеры с ожиданием -> /setsticker flow, групповые -> спам-детекция.
 func (b *Bot) handleMessage(c tele.Context) error {
@@ -612,11 +667,16 @@ func (b *Bot) handleSpamNew(c tele.Context, msg *tele.Message, cfg *storage.Chat
 		return nil
 	}
 
+	// в тестовом режиме дописываем счётчик M/N и rb M/N к каждому сообщению
+	if cfg.TestMode && result.Message != "" {
+		result.Message = fmt.Sprintf("[ТЕСТ %d/%d rb:%d/%d] %s",
+			result.Count, result.Limit, result.RBSpamCount, result.RBThreshold, result.Message)
+	}
+
 	var replyMsgID sql.NullInt64
 
 	switch result.Action {
 	case storage.ActionRestrict:
-		// в тестовом режиме вместо реального restrict — текстовое сообщение (FR-017)
 		b.restrictUser(c, msg, cfg)
 		_ = b.storage.MarkKicked(chatID, msg.Sender.ID)
 
@@ -694,16 +754,21 @@ func (b *Bot) kickUser(c tele.Context, msg *tele.Message) {
 }
 
 // restrictUser ограничивает пользователя (can_send_other_messages: false) до конца суток UTC.
-// В тестовом режиме вместо реального restrict отправляет текстовое сообщение (FR-017).
+// В тестовом режиме: админы получают текстовое сообщение, не-админы — реальный restrict.
 func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) {
 	chatID := c.Chat().ID
 
 	if cfg.TestMode {
-		// тестовый режим — только сообщение (FR-017)
-		testMsg := fmt.Sprintf("[ТЕСТ] Был бы restrict: %s", displayName(msg.Sender))
-		b.sendReply(c, msg, testMsg)
-		b.logger.Info("test restrict", "chat_id", chatID, "user_id", msg.Sender.ID, "display_name", displayName(msg.Sender))
-		return
+		// проверяем, является ли пользователь админом
+		member, err := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
+		if err == nil && (member.Role == tele.Administrator || member.Role == tele.Creator) {
+			// админ в тестовом режиме — только сообщение, не рестриктим
+			testMsg := fmt.Sprintf("[ТЕСТ] Был бы restrict: %s", displayName(msg.Sender))
+			b.sendReply(c, msg, testMsg)
+			b.logger.Info("test restrict (admin)", "chat_id", chatID, "user_id", msg.Sender.ID, "display_name", displayName(msg.Sender))
+			return
+		}
+		// не-админ — рестриктим реально (даже в тестовом режиме)
 	}
 
 	// реальный restrict (FR-001, FR-002, FR-003)
@@ -725,7 +790,7 @@ func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatC
 		return
 	}
 
-	b.logger.Info("user restricted", "chat_id", chatID, "user_id", msg.Sender.ID, "until", member.RestrictedUntil)
+	b.logger.Info("user restricted", "chat_id", chatID, "user_id", msg.Sender.ID, "until", member.RestrictedUntil, "test_mode", cfg.TestMode)
 }
 
 // endOfDayUTC возвращает Unix timestamp полуночи следующего дня UTC.

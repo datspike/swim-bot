@@ -192,6 +192,20 @@ func (s *Storage) IncrementSpamCounterBy(chatID, userID int64, amount int) (*Spa
 	return &sc, nil
 }
 
+// ResetSpamCounters сбрасывает все счётчики спама для чата за сегодня.
+// Используется в тестовом режиме для повторного тестирования.
+func (s *Storage) ResetSpamCounters(chatID int64) (int64, error) {
+	result, err := s.db.Exec(`
+		DELETE FROM spam_counter
+		WHERE chat_id = ? AND date = date('now')
+	`, chatID)
+	if err != nil {
+		return 0, errors.Join(errors.New("не удалось сбросить счётчики"), err)
+	}
+	affected, _ := result.RowsAffected()
+	return affected, nil
+}
+
 // DeleteSticker удаляет стикер из конфигурации чата (FR-006).
 func (s *Storage) DeleteSticker(chatID int64) error {
 	_, err := s.db.Exec(`
