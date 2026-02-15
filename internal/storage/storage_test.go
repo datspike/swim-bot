@@ -216,6 +216,32 @@ func TestInsertActionLog_NullReplyMessageID(t *testing.T) {
 	}
 }
 
+func TestChatConfig_NewFields_Defaults(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+
+	_, err := store.UpsertTrackedBot(chatID, "spambot")
+	if err != nil {
+		t.Fatalf("UpsertTrackedBot failed: %v", err)
+	}
+
+	cfg, err := store.GetChatConfig(chatID)
+	if err != nil {
+		t.Fatalf("GetChatConfig failed: %v", err)
+	}
+
+	// дефолтные значения из миграции 003
+	if cfg.TestMode {
+		t.Error("TestMode: ожидалось false по умолчанию")
+	}
+	if cfg.RingBufferSize != 20 {
+		t.Errorf("RingBufferSize: ожидалось 20, получено %d", cfg.RingBufferSize)
+	}
+	if cfg.RingBufferThreshold != 2 {
+		t.Errorf("RingBufferThreshold: ожидалось 2, получено %d", cfg.RingBufferThreshold)
+	}
+}
+
 func TestGetStats_Empty(t *testing.T) {
 	store := setupTestDB(t)
 

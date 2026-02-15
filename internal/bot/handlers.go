@@ -528,6 +528,34 @@ func (b *Bot) kickUser(c tele.Context, msg *tele.Message) {
 	b.logger.Info("user kicked", "chat_id", chatID, "user_id", msg.Sender.ID)
 }
 
+// endOfDayUTC возвращает Unix timestamp полуночи следующего дня UTC.
+// Если до конца суток < 30 секунд — берёт конец следующих суток,
+// т.к. Telegram считает restrict < 30с бессрочным.
+func endOfDayUTC() int64 {
+	now := time.Now().UTC()
+	endOfDay := now.Truncate(24 * time.Hour).Add(24 * time.Hour)
+	if endOfDay.Sub(now) < 30*time.Second {
+		endOfDay = endOfDay.Add(24 * time.Hour)
+	}
+	return endOfDay.Unix()
+}
+
+// displayName возвращает отображаемое имя пользователя.
+// Формат: "FirstName LastName" или "@Username" или "Unknown".
+func displayName(user *tele.User) string {
+	name := user.FirstName
+	if user.LastName != "" {
+		name += " " + user.LastName
+	}
+	if name == "" && user.Username != "" {
+		name = "@" + user.Username
+	}
+	if name == "" {
+		name = "Unknown"
+	}
+	return name
+}
+
 // StartStickerAwaitCleanup запускает горутину очистки просроченных ожиданий стикеров.
 func StartStickerAwaitCleanup() {
 	go func() {
