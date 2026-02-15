@@ -109,6 +109,88 @@ func (b *Bot) processSpam(chatID, userID int64, msg *tele.Message, cfg *storage.
 	}
 }
 
+// detectContextNew определяет контекст спам-сообщения по ring buffer (FR-010a).
+// Reactive если N+ спам-записей от других пользователей в окне, иначе Organic.
+func (b *Bot) detectContextNew(chatID, userID int64, cfg *storage.ChatConfig) storage.MessageContext {
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	spamCount := rb.SpamCountByOthers(userID)
+	if spamCount >= cfg.RingBufferThreshold {
+		return storage.ContextReactive
+	}
+	return storage.ContextOrganic
+}
+
+// processSpamNew обрабатывает спам по новой логике (FR-007..FR-009).
+// Новая логика: consume 1 + steal 1 в реактивном контексте, restrict вместо кика.
+func (b *Bot) processSpamNew(chatID, userID int64, msg *tele.Message, cfg *storage.ChatConfig) (*spamResult, error) {
+	// получаем или создаём счётчик
+	counter, err := b.storage.GetOrCreateSpamCounter(chatID, userID, cfg.DailyLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	// уже ограничен ранее — пропускаем (не нужен повторный restrict)
+	if counter.Kicked {
+		return &spamResult{Action: storage.ActionRestrict}, nil
+	}
+
+	// определяем контекст
+	ctx := b.detectContextNew(chatID, userID, cfg)
+
+	// consume 1 попытку
+	counter, err = b.storage.IncrementSpamCounter(chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	remaining := counter.EffectiveLimit - counter.Count
+
+	// реактивный контекст: штраф (FR-007, FR-008, FR-009)
+	if ctx == storage.ContextReactive && remaining > 0 {
+		// воруем ещё 1 попытку
+		counter, err = b.storage.IncrementSpamCounter(chatID, userID)
+		if err != nil {
+			return nil, err
+		}
+		remaining = counter.EffectiveLimit - counter.Count
+
+		if remaining <= 0 {
+			// FR-008: штраф + лимит исчерпан
+			return &spamResult{
+				Action:    storage.ActionRestrict,
+				Remaining: 0,
+				Message:   "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
+			}, nil
+		}
+
+		// FR-007: штраф, ещё есть попытки
+		return &spamResult{
+			Action:    storage.ActionWarning,
+			Remaining: remaining,
+			Message:   "Группами плавать нежелательно, ворую попытку, осталось: " + itoa(remaining),
+		}, nil
+	}
+
+	// определяем действие
+	switch {
+	case remaining <= 0:
+		// FR-009 / FR-004: лимит исчерпан -> restrict
+		return &spamResult{
+			Action:    storage.ActionRestrict,
+			Remaining: 0,
+			Message:   "Все, на сегодня наплавались",
+		}, nil
+
+	default:
+		// ещё есть попытки — предупреждение
+		return &spamResult{
+			Action:    storage.ActionWarning,
+			Remaining: remaining,
+			Message:   formatRemaining(remaining),
+		}, nil
+	}
+}
+
 // formatRemaining форматирует сообщение об оставшихся попытках.
 func formatRemaining(remaining int) string {
 	suffix := "раз"

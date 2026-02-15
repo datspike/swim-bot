@@ -254,7 +254,7 @@ func TestUpdateRateLimitConfig(t *testing.T) {
 
 	_, _ = store.UpsertTrackedBot(chatID, "spambot")
 
-	err := store.UpdateRateLimitConfig(chatID, 6, 2, 10, 5, 3)
+	err := store.UpdateRateLimitConfig(chatID, 6, 2, 10, 5, 3, 30, 3)
 	if err != nil {
 		t.Fatalf("UpdateRateLimitConfig failed: %v", err)
 	}
@@ -274,6 +274,83 @@ func TestUpdateRateLimitConfig(t *testing.T) {
 	}
 	if cfg.SpamDensityWindowMin != 3 {
 		t.Errorf("SpamDensityWindowMin = %d, want 3", cfg.SpamDensityWindowMin)
+	}
+	if cfg.RingBufferSize != 30 {
+		t.Errorf("RingBufferSize = %d, want 30", cfg.RingBufferSize)
+	}
+	if cfg.RingBufferThreshold != 3 {
+		t.Errorf("RingBufferThreshold = %d, want 3", cfg.RingBufferThreshold)
+	}
+}
+
+func TestSetTestMode(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+
+	// включаем тестовый режим
+	err := store.SetTestMode(chatID, true)
+	if err != nil {
+		t.Fatalf("SetTestMode(true) failed: %v", err)
+	}
+	cfg, _ := store.GetChatConfig(chatID)
+	if !cfg.TestMode {
+		t.Error("TestMode: ожидалось true")
+	}
+
+	// выключаем
+	err = store.SetTestMode(chatID, false)
+	if err != nil {
+		t.Fatalf("SetTestMode(false) failed: %v", err)
+	}
+	cfg, _ = store.GetChatConfig(chatID)
+	if cfg.TestMode {
+		t.Error("TestMode: ожидалось false")
+	}
+}
+
+func TestIncrementSpamCounterBy(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+	userID := int64(12345)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+
+	// increment на 2 (для нового счётчика)
+	sc, err := store.IncrementSpamCounterBy(chatID, userID, 2)
+	if err != nil {
+		t.Fatalf("IncrementSpamCounterBy failed: %v", err)
+	}
+	if sc.Count != 2 {
+		t.Errorf("Count = %d, want 2", sc.Count)
+	}
+
+	// increment на 1 (для существующего)
+	sc, err = store.IncrementSpamCounterBy(chatID, userID, 1)
+	if err != nil {
+		t.Fatalf("IncrementSpamCounterBy failed: %v", err)
+	}
+	if sc.Count != 3 {
+		t.Errorf("Count = %d, want 3", sc.Count)
+	}
+}
+
+func TestDeleteSticker(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_ = store.UpsertStickerFileID(chatID, "sticker123")
+
+	err := store.DeleteSticker(chatID)
+	if err != nil {
+		t.Fatalf("DeleteSticker failed: %v", err)
+	}
+
+	cfg, _ := store.GetChatConfig(chatID)
+	if cfg.StickerFileID != "" {
+		t.Errorf("StickerFileID = %q, want empty", cfg.StickerFileID)
 	}
 }
 

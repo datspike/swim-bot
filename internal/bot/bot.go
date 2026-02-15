@@ -12,9 +12,10 @@ import (
 
 // Bot содержит инициализированного Telegram бота.
 type Bot struct {
-	bot     *tele.Bot
-	storage *storage.Storage
-	logger  *slog.Logger
+	bot          *tele.Bot
+	storage      *storage.Storage
+	logger       *slog.Logger
+	ringBuffers  ChatRingBuffers // скользящие окна сообщений per-chat
 }
 
 // Config содержит параметры для создания бота.
@@ -99,6 +100,8 @@ func (b *Bot) registerHandlers() {
 	privateGroup.Handle("/setstickerpack", b.handleSetStickerPack)
 	privateGroup.Handle("/setlimits", b.handleSetLimits)
 	privateGroup.Handle("/stats", b.handleStats)
+	privateGroup.Handle("/testmode", b.handleTestMode)
+	privateGroup.Handle("/delsticker", b.handleDelSticker)
 
 	// все типы сообщений — единый роутер: приватные стикеры -> /setsticker flow, групповые -> спам-детекция
 	for _, event := range []string{tele.OnText, tele.OnPhoto, tele.OnDocument, tele.OnSticker, tele.OnVideo, tele.OnAnimation} {

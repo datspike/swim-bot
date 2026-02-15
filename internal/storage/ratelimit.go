@@ -141,15 +141,74 @@ func (s *Storage) UpsertTrackedStickerPack(chatID int64, packName string) error 
 	return nil
 }
 
-// UpdateRateLimitConfig обновляет настройки rate limiting для чата.
-func (s *Storage) UpdateRateLimitConfig(chatID int64, dailyLimit, reactiveLimit, reactiveWindowMin, spamDensityThreshold, spamDensityWindowMin int) error {
+// SetTestMode включает/выключает тестовый режим для чата (FR-014, FR-020).
+func (s *Storage) SetTestMode(chatID int64, enabled bool) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	_, err := s.db.Exec(`
+		UPDATE chat_config
+		SET test_mode = ?, updated_at = datetime('now')
+		WHERE chat_id = ?
+	`, val, chatID)
+	if err != nil {
+		return errors.Join(errors.New("не удалось обновить test_mode"), err)
+	}
+	return nil
+}
+
+// IncrementSpamCounterBy увеличивает счётчик спама на указанное количество (FR-007).
+// Используется для штрафа за групповой спам.
+func (s *Storage) IncrementSpamCounterBy(chatID, userID int64, amount int) (*SpamCounter, error) {
+	_, err := s.db.Exec(`
+		INSERT INTO spam_counter (chat_id, user_id, date, count, effective_limit)
+		VALUES (?, ?, date('now'), ?, 4)
+		ON CONFLICT(chat_id, user_id, date) DO UPDATE SET
+			count = count + ?, updated_at = datetime('now')
+	`, chatID, userID, amount, amount)
+	if err != nil {
+		return nil, errors.Join(errors.New("не удалось увеличить spam_counter"), err)
+	}
+
+	row := s.db.QueryRow(`
+		SELECT chat_id, user_id, date, count, effective_limit, kicked
+		FROM spam_counter
+		WHERE chat_id = ? AND user_id = ? AND date = date('now')
+	`, chatID, userID)
+
+	var sc SpamCounter
+	err = row.Scan(&sc.ChatID, &sc.UserID, &sc.Date, &sc.Count, &sc.EffectiveLimit, &sc.Kicked)
+	if err != nil {
+		return nil, errors.Join(errors.New("не удалось получить обновлённый spam_counter"), err)
+	}
+
+	return &sc, nil
+}
+
+// DeleteSticker удаляет стикер из конфигурации чата (FR-006).
+func (s *Storage) DeleteSticker(chatID int64) error {
+	_, err := s.db.Exec(`
+		UPDATE chat_config
+		SET sticker_file_id = '', updated_at = datetime('now')
+		WHERE chat_id = ?
+	`, chatID)
+	if err != nil {
+		return errors.Join(errors.New("не удалось удалить стикер"), err)
+	}
+	return nil
+}
+
+// UpdateRateLimitConfig обновляет настройки rate limiting для чата, включая ring buffer (FR-010b).
+func (s *Storage) UpdateRateLimitConfig(chatID int64, dailyLimit, reactiveLimit, reactiveWindowMin, spamDensityThreshold, spamDensityWindowMin, ringBufferSize, ringBufferThreshold int) error {
 	_, err := s.db.Exec(`
 		UPDATE chat_config
 		SET daily_limit = ?, reactive_limit = ?, reactive_window_min = ?,
 			spam_density_threshold = ?, spam_density_window_min = ?,
+			ring_buffer_size = ?, ring_buffer_threshold = ?,
 			updated_at = datetime('now')
 		WHERE chat_id = ?
-	`, dailyLimit, reactiveLimit, reactiveWindowMin, spamDensityThreshold, spamDensityWindowMin, chatID)
+	`, dailyLimit, reactiveLimit, reactiveWindowMin, spamDensityThreshold, spamDensityWindowMin, ringBufferSize, ringBufferThreshold, chatID)
 	if err != nil {
 		return errors.Join(errors.New("не удалось обновить настройки rate limiting"), err)
 	}

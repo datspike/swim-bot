@@ -312,12 +312,12 @@ func (b *Bot) handleSetStickerPack(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Отслеживаю стикерпак %s в чате %s.", packName, chatTitle))
 }
 
-// handleSetLimits обрабатывает команду /setlimits <chat_id> [daily=N] [reactive=N] [window=N].
-// Настраивает параметры rate limiting для чата (US-004).
+// handleSetLimits обрабатывает команду /setlimits <chat_id> [daily=N] [reactive=N] [window=N] ...
+// Настраивает параметры rate limiting для чата, включая ring buffer (FR-010b).
 func (b *Bot) handleSetLimits(c tele.Context) error {
 	args := c.Args()
 	if len(args) < 2 {
-		return c.Send("Формат: /setlimits <chat_id> [daily=N] [reactive=N] [window=N] [density=N] [density_window=N]")
+		return c.Send("Формат: /setlimits <chat_id> [daily=N] [reactive=N] [window=N] [density=N] [density_window=N] [rb_size=N] [rb_threshold=N]")
 	}
 
 	chatID, err := strconv.ParseInt(args[0], 10, 64)
@@ -348,6 +348,8 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 	window := cfg.ReactiveWindowMin
 	density := cfg.SpamDensityThreshold
 	densityWindow := cfg.SpamDensityWindowMin
+	rbSize := cfg.RingBufferSize
+	rbThreshold := cfg.RingBufferThreshold
 
 	for _, arg := range args[1:] {
 		parts := strings.SplitN(arg, "=", 2)
@@ -370,10 +372,14 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 			density = val
 		case "density_window":
 			densityWindow = val
+		case "rb_size":
+			rbSize = val
+		case "rb_threshold":
+			rbThreshold = val
 		}
 	}
 
-	err = b.storage.UpdateRateLimitConfig(chatID, daily, reactive, window, density, densityWindow)
+	err = b.storage.UpdateRateLimitConfig(chatID, daily, reactive, window, density, densityWindow, rbSize, rbThreshold)
 	if err != nil {
 		b.logger.Error("update rate limit config failed", "chat_id", chatID, "error", err)
 		return c.Send("Не удалось обновить настройки. Попробуй позже.")
@@ -381,8 +387,95 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 
 	b.logger.Info("rate limits updated", "chat_id", chatID, "daily", daily, "reactive", reactive, "window", window, "by_user", c.Sender().ID)
 
-	return c.Send(fmt.Sprintf("Лимиты обновлены: daily=%d, reactive=%d, window=%d мин, density=%d/%d мин",
-		daily, reactive, window, density, densityWindow))
+	return c.Send(fmt.Sprintf("Лимиты обновлены: daily=%d, reactive=%d, window=%d мин, density=%d/%d мин, rb_size=%d, rb_threshold=%d",
+		daily, reactive, window, density, densityWindow, rbSize, rbThreshold))
+}
+
+// handleTestMode обрабатывает команду /testmode <chat_id> on|off (FR-014).
+func (b *Bot) handleTestMode(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /testmode <chat_id> on|off")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+
+	mode := strings.ToLower(args[1])
+	if mode != "on" && mode != "off" {
+		return c.Send("Использование: /testmode <chat_id> on|off")
+	}
+
+	// проверка прав администратора
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("testmode admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	// проверяем что чат существует в конфиге
+	cfg, err := b.storage.GetChatConfig(chatID)
+	if err != nil || cfg == nil {
+		return c.Send(fmt.Sprintf("Чат %d не найден в конфигурации.", chatID))
+	}
+
+	enabled := mode == "on"
+	if err := b.storage.SetTestMode(chatID, enabled); err != nil {
+		b.logger.Error("set test mode failed", "chat_id", chatID, "error", err)
+		return c.Send("Не удалось обновить настройки. Попробуй позже.")
+	}
+
+	b.logger.Info("test mode updated", "chat_id", chatID, "enabled", enabled, "by_user", c.Sender().ID)
+
+	if enabled {
+		return c.Send(fmt.Sprintf("Тестовый режим включён для чата %d", chatID))
+	}
+	return c.Send(fmt.Sprintf("Тестовый режим выключен для чата %d", chatID))
+}
+
+// handleDelSticker обрабатывает команду /delsticker <chat_id> (FR-006).
+func (b *Bot) handleDelSticker(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("Использование: /delsticker <chat_id>")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+
+	// проверка прав администратора
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("delsticker admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	// проверяем наличие стикера
+	cfg, err := b.storage.GetChatConfig(chatID)
+	if err != nil || cfg == nil {
+		return c.Send(fmt.Sprintf("Чат %d не найден в конфигурации.", chatID))
+	}
+	if cfg.StickerFileID == "" {
+		return c.Send(fmt.Sprintf("Для чата %d стикер не настроен.", chatID))
+	}
+
+	if err := b.storage.DeleteSticker(chatID); err != nil {
+		b.logger.Error("delete sticker failed", "chat_id", chatID, "error", err)
+		return c.Send("Не удалось удалить стикер. Попробуй позже.")
+	}
+
+	b.logger.Info("sticker deleted", "chat_id", chatID, "by_user", c.Sender().ID)
+	return c.Send(fmt.Sprintf("Стикер удалён для чата %d", chatID))
 }
 
 // handleMessage — единый роутер для всех типов сообщений.
@@ -429,7 +522,7 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		return nil
 	}
 
-	// детекция спама: via_bot ИЛИ sticker pack (FR-004)
+	// детекция спама: via_bot ИЛИ sticker pack
 	isSpam := false
 	var triggerType string
 
@@ -442,26 +535,46 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		triggerType = "sticker_pack"
 	}
 
+	// обновляем ring buffer (для тестового режима, все сообщения)
+	if cfg.TestMode {
+		rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+		rb.Push(isSpam, msg.Sender.ID)
+	}
+
 	if !isSpam {
 		return nil
 	}
 
-	// проверяем роль — администраторы освобождены (FR-003)
-	// при ошибке API — пропускаем сообщение (не кикаем при неизвестной роли)
-	member, err := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
-	if err != nil {
-		b.logger.Warn("admin check failed in spam detection, skipping", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
-		return nil
-	}
-	if member.Role == tele.Administrator || member.Role == tele.Creator {
-		return nil
+	// в тестовом режиме: админы обрабатываются как обычные пользователи (FR-016)
+	// в обычном режиме: админы освобождены
+	if !cfg.TestMode {
+		member, err := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
+		if err != nil {
+			b.logger.Warn("admin check failed in spam detection, skipping", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
+			return nil
+		}
+		if member.Role == tele.Administrator || member.Role == tele.Creator {
+			return nil
+		}
 	}
 
 	b.logger.Info("spam detected",
 		"chat_id", chatID, "user_id", msg.Sender.ID,
-		"trigger", triggerType, "message_id", msg.ID)
+		"trigger", triggerType, "message_id", msg.ID,
+		"test_mode", cfg.TestMode)
 
-	// обрабатываем через rate limiting
+	// dual code path: тестовый режим -> новая логика, обычный -> legacy (FR-015, FR-018)
+	if cfg.TestMode {
+		return b.handleSpamNew(c, msg, cfg)
+	}
+	return b.handleSpamLegacy(c, msg, cfg)
+}
+
+// handleSpamLegacy обрабатывает спам по старой логике (кик, время-окно, SpamWave).
+// Используется в обычных чатах (FR-018).
+func (b *Bot) handleSpamLegacy(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) error {
+	chatID := c.Chat().ID
+
 	result, err := b.processSpam(chatID, msg.Sender.ID, msg, cfg)
 	if err != nil {
 		b.logger.Error("process spam failed", "chat_id", chatID, "error", err)
@@ -472,13 +585,11 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 
 	switch result.Action {
 	case storage.ActionKick:
-		// стикер + кик (FR-012)
 		b.sendSticker(c, msg, cfg)
 		b.kickUser(c, msg)
 		_ = b.storage.MarkKicked(chatID, msg.Sender.ID)
 
 	case storage.ActionFinalWarning, storage.ActionWarning:
-		// текстовое сообщение
 		replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
 		if sendErr != nil {
 			b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
@@ -487,8 +598,55 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		}
 	}
 
-	// определяем контекст для лога
 	ctx := b.detectContext(chatID, msg.Sender.ID, msg, cfg)
+
+	logErr := b.storage.InsertActionLog(chatID, msg.Sender.ID, int64(msg.ID), replyMsgID, ctx, result.Action)
+	if logErr != nil {
+		b.logger.Error("insert action log failed", "chat_id", chatID, "error", logErr)
+	}
+
+	return nil
+}
+
+// handleSpamNew обрабатывает спам по новой логике (restrict, ring buffer, штраф).
+// Используется в тестовых чатах (FR-015).
+func (b *Bot) handleSpamNew(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) error {
+	chatID := c.Chat().ID
+
+	result, err := b.processSpamNew(chatID, msg.Sender.ID, msg, cfg)
+	if err != nil {
+		b.logger.Error("process spam new failed", "chat_id", chatID, "error", err)
+		return nil
+	}
+
+	var replyMsgID sql.NullInt64
+
+	switch result.Action {
+	case storage.ActionRestrict:
+		// в тестовом режиме вместо реального restrict — текстовое сообщение (FR-017)
+		b.restrictUser(c, msg, cfg)
+		_ = b.storage.MarkKicked(chatID, msg.Sender.ID)
+
+		// отправляем текст предупреждения если есть
+		if result.Message != "" {
+			replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
+			if sendErr != nil {
+				b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
+			} else if replyMsg != nil {
+				replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
+			}
+		}
+
+	case storage.ActionFinalWarning, storage.ActionWarning:
+		replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
+		if sendErr != nil {
+			b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
+		} else if replyMsg != nil {
+			replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
+		}
+	}
+
+	ctx := b.detectContextNew(chatID, msg.Sender.ID, cfg)
 
 	logErr := b.storage.InsertActionLog(chatID, msg.Sender.ID, int64(msg.ID), replyMsgID, ctx, result.Action)
 	if logErr != nil {
@@ -526,6 +684,44 @@ func (b *Bot) kickUser(c tele.Context, msg *tele.Message) {
 	}
 
 	b.logger.Info("user kicked", "chat_id", chatID, "user_id", msg.Sender.ID)
+}
+
+// restrictUser ограничивает пользователя (can_send_other_messages: false) до конца суток UTC.
+// В тестовом режиме вместо реального restrict отправляет текстовое сообщение (FR-017).
+func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) {
+	chatID := c.Chat().ID
+
+	if cfg.TestMode {
+		// тестовый режим — только сообщение (FR-017)
+		testMsg := fmt.Sprintf("[ТЕСТ] Был бы restrict: %s", displayName(msg.Sender))
+		_, err := c.Bot().Reply(msg, testMsg)
+		if err != nil {
+			b.logger.Error("send test restrict message failed", "chat_id", chatID, "error", err)
+		}
+		b.logger.Info("test restrict", "chat_id", chatID, "user_id", msg.Sender.ID, "display_name", displayName(msg.Sender))
+		return
+	}
+
+	// реальный restrict (FR-001, FR-002, FR-003)
+	rights := tele.NoRestrictions()
+	rights.CanSendOther = false // блокируем инлайн-ботов, стикеры, GIF
+	rights.Independent = true   // не затрагиваем остальные права (FR-002)
+
+	member := &tele.ChatMember{
+		User:            msg.Sender,
+		Rights:          rights,
+		RestrictedUntil: endOfDayUTC(),
+	}
+
+	err := withRetry(func() error {
+		return c.Bot().Restrict(c.Chat(), member)
+	}, b.logger)
+	if err != nil {
+		b.logger.Error("restrict failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
+		return
+	}
+
+	b.logger.Info("user restricted", "chat_id", chatID, "user_id", msg.Sender.ID, "until", member.RestrictedUntil)
 }
 
 // endOfDayUTC возвращает Unix timestamp полуночи следующего дня UTC.

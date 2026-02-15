@@ -152,7 +152,7 @@ func TestProcessSpam_CustomLimits(t *testing.T) {
 	_ = store.UpsertStickerFileID(chatID, "sticker123")
 
 	// кастомный лимит: 2
-	_ = store.UpdateRateLimitConfig(chatID, 2, 1, 15, 3, 5)
+	_ = store.UpdateRateLimitConfig(chatID, 2, 1, 15, 3, 5, 20, 2)
 	cfg, _ := store.GetChatConfig(chatID)
 
 	// 1-й спам: осталось 1
@@ -171,5 +171,172 @@ func TestProcessSpam_CustomLimits(t *testing.T) {
 	result, _ = b.processSpam(chatID, userID, nil, cfg)
 	if result.Action != storage.ActionKick {
 		t.Errorf("Action = %d, want Kick", result.Action)
+	}
+}
+
+// TestDetectContextNew_Organic проверяет органический контекст (пустой ring buffer).
+func TestDetectContextNew_Organic(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	ctx := b.detectContextNew(chatID, 100, cfg)
+	if ctx != storage.ContextOrganic {
+		t.Errorf("ожидался Organic, получено %d", ctx)
+	}
+}
+
+// TestDetectContextNew_Reactive проверяет реактивный контекст (порог достигнут).
+func TestDetectContextNew_Reactive(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// наполняем ring buffer спамом от других пользователей
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rb.Push(true, 200)
+	rb.Push(true, 300)
+
+	ctx := b.detectContextNew(chatID, 100, cfg)
+	if ctx != storage.ContextReactive {
+		t.Errorf("ожидался Reactive, получено %d", ctx)
+	}
+}
+
+// TestDetectContextNew_ExcludeSelf проверяет что собственный спам не считается.
+func TestDetectContextNew_ExcludeSelf(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// спам только от себя — не считается
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rb.Push(true, 100)
+	rb.Push(true, 100)
+	rb.Push(true, 100)
+
+	ctx := b.detectContextNew(chatID, 100, cfg)
+	if ctx != storage.ContextOrganic {
+		t.Errorf("собственный спам не должен считаться: ожидался Organic, получено %d", ctx)
+	}
+}
+
+// TestProcessSpamNew_OrganicFlow проверяет полный органический флоу с restrict.
+func TestProcessSpamNew_OrganicFlow(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+	userID := int64(12345)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_ = store.UpsertStickerFileID(chatID, "sticker123")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// 1-й спам: предупреждение (осталось 3)
+	result, err := b.processSpamNew(chatID, userID, nil, cfg)
+	if err != nil {
+		t.Fatalf("processSpamNew #1 failed: %v", err)
+	}
+	if result.Action != storage.ActionWarning {
+		t.Errorf("Action = %d, want Warning", result.Action)
+	}
+	if result.Remaining != 3 {
+		t.Errorf("Remaining = %d, want 3", result.Remaining)
+	}
+
+	// 4-й спам: restrict (вместо кика)
+	for i := 2; i <= 3; i++ {
+		_, _ = b.processSpamNew(chatID, userID, nil, cfg)
+	}
+	result, _ = b.processSpamNew(chatID, userID, nil, cfg)
+	if result.Action != storage.ActionRestrict {
+		t.Errorf("Action = %d, want Restrict", result.Action)
+	}
+	if result.Message != "Все, на сегодня наплавались" {
+		t.Errorf("Message = %q, want 'Все, на сегодня наплавались'", result.Message)
+	}
+}
+
+// TestProcessSpamNew_ReactiveSteal проверяет штраф в реактивном контексте.
+func TestProcessSpamNew_ReactiveSteal(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+	userID := int64(12345)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_ = store.UpsertStickerFileID(chatID, "sticker123")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// наполняем ring buffer спамом от других → reactive контекст
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rb.Push(true, 200)
+	rb.Push(true, 300)
+
+	// 1-й спам в reactive: consume 1 + steal 1 = 2 потрачено, remaining = 2
+	result, err := b.processSpamNew(chatID, userID, nil, cfg)
+	if err != nil {
+		t.Fatalf("processSpamNew failed: %v", err)
+	}
+	if result.Action != storage.ActionWarning {
+		t.Errorf("Action = %d, want Warning", result.Action)
+	}
+	if result.Remaining != 2 {
+		t.Errorf("Remaining = %d, want 2", result.Remaining)
+	}
+	if result.Message != "Группами плавать нежелательно, ворую попытку, осталось: 2" {
+		t.Errorf("Message = %q", result.Message)
+	}
+}
+
+// TestProcessSpamNew_ReactiveStealToZero проверяет штраф + restrict.
+func TestProcessSpamNew_ReactiveStealToZero(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+	userID := int64(12345)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_ = store.UpsertStickerFileID(chatID, "sticker123")
+
+	// лимит 2: consume 1 + steal 1 = 0 remaining
+	_ = store.UpdateRateLimitConfig(chatID, 2, 1, 15, 3, 5, 20, 2)
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// наполняем ring buffer
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rb.Push(true, 200)
+	rb.Push(true, 300)
+
+	result, err := b.processSpamNew(chatID, userID, nil, cfg)
+	if err != nil {
+		t.Fatalf("processSpamNew failed: %v", err)
+	}
+	if result.Action != storage.ActionRestrict {
+		t.Errorf("Action = %d, want Restrict", result.Action)
+	}
+	if result.Message != "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались" {
+		t.Errorf("Message = %q", result.Message)
+	}
+}
+
+// TestProcessSpamNew_AlreadyKicked проверяет повторный restrict для уже ограниченного.
+func TestProcessSpamNew_AlreadyKicked(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+	userID := int64(12345)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	cfg, _ := store.GetChatConfig(chatID)
+
+	_, _ = store.GetOrCreateSpamCounter(chatID, userID, cfg.DailyLimit)
+	_ = store.MarkKicked(chatID, userID)
+
+	result, _ := b.processSpamNew(chatID, userID, nil, cfg)
+	if result.Action != storage.ActionRestrict {
+		t.Errorf("Action = %d, want Restrict", result.Action)
 	}
 }
