@@ -10,12 +10,16 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
+// defaultMaxMessageAge — максимальный возраст сообщения для обработки (FR-011).
+const defaultMaxMessageAge = 30 * time.Second
+
 // Bot содержит инициализированного Telegram бота.
 type Bot struct {
-	bot          *tele.Bot
-	storage      *storage.Storage
-	logger       *slog.Logger
-	ringBuffers  ChatRingBuffers // скользящие окна сообщений per-chat
+	bot           *tele.Bot
+	storage       *storage.Storage
+	logger        *slog.Logger
+	ringBuffers   ChatRingBuffers // скользящие окна сообщений per-chat
+	maxMessageAge time.Duration   // порог пропуска старых сообщений (webhook backlog)
 }
 
 // Config содержит параметры для создания бота.
@@ -24,6 +28,7 @@ type Config struct {
 	WebhookURL    string
 	WebhookSecret string
 	Port          int
+	MaxMessageAge time.Duration // 0 = defaultMaxMessageAge (30s)
 	Storage       *storage.Storage
 	Logger        *slog.Logger
 }
@@ -50,10 +55,16 @@ func New(cfg Config) (*Bot, error) {
 		return nil, err
 	}
 
+	maxAge := cfg.MaxMessageAge
+	if maxAge == 0 {
+		maxAge = defaultMaxMessageAge
+	}
+
 	b := &Bot{
-		bot:     teleBot,
-		storage: cfg.Storage,
-		logger:  cfg.Logger,
+		bot:           teleBot,
+		storage:       cfg.Storage,
+		logger:        cfg.Logger,
+		maxMessageAge: maxAge,
 	}
 
 	// регистрация хендлеров

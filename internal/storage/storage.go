@@ -84,6 +84,27 @@ type Storage struct {
 	logger *slog.Logger
 }
 
+// withSQLiteRetry выполняет fn с повторами при SQLITE_BUSY (FR-013).
+// Максимум maxRetries повторов с экспоненциальным backoff.
+func withSQLiteRetry(fn func() error, maxRetries int) error {
+	for i := 0; i < maxRetries; i++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if !isBusyError(err) {
+			return err
+		}
+		time.Sleep(time.Duration(50*(i+1)) * time.Millisecond)
+	}
+	return fn()
+}
+
+// isBusyError проверяет, является ли ошибка SQLITE_BUSY.
+func isBusyError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "SQLITE_BUSY")
+}
+
 // NewStorage создаёт новое подключение к SQLite с оптимальными настройками.
 // DSN должен содержать путь к файлу БД или ":memory:" для in-memory.
 func NewStorage(dsn string, logger *slog.Logger) (*Storage, error) {

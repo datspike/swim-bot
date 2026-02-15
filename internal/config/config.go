@@ -21,6 +21,8 @@ type Config struct {
 	LogLevel string
 	// DBPath — путь к SQLite базе данных.
 	DBPath string
+	// MaxMessageAgeSec — порог пропуска старых сообщений в секундах (FR-011, по умолчанию 30).
+	MaxMessageAgeSec int
 }
 
 // ErrMissingEnv возвращается когда обязательная переменная окружения не задана.
@@ -63,6 +65,17 @@ func Load() (*Config, error) {
 	cfg.LogLevel = os.Getenv("LOG_LEVEL")
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
+	}
+
+	maxAgeStr := os.Getenv("MAX_MESSAGE_AGE_SEC")
+	if maxAgeStr == "" {
+		cfg.MaxMessageAgeSec = 30
+	} else {
+		age, err := strconv.Atoi(maxAgeStr)
+		if err != nil {
+			return nil, errors.New("MAX_MESSAGE_AGE_SEC должен быть числом")
+		}
+		cfg.MaxMessageAgeSec = age
 	}
 
 	return cfg, nil

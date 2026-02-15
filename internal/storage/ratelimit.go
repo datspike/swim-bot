@@ -32,13 +32,16 @@ func (s *Storage) GetOrCreateSpamCounter(chatID, userID int64, defaultLimit int)
 	return &sc, nil
 }
 
-// IncrementSpamCounter увеличивает счётчик спама и возвращает обновлённое значение.
+// IncrementSpamCounter увеличивает счётчик спама и возвращает обновлённое значение (FR-013: retry при BUSY).
 func (s *Storage) IncrementSpamCounter(chatID, userID int64) (*SpamCounter, error) {
-	_, err := s.db.Exec(`
-		UPDATE spam_counter
-		SET count = count + 1, updated_at = datetime('now')
-		WHERE chat_id = ? AND user_id = ? AND date = date('now')
-	`, chatID, userID)
+	err := withSQLiteRetry(func() error {
+		_, e := s.db.Exec(`
+			UPDATE spam_counter
+			SET count = count + 1, updated_at = datetime('now')
+			WHERE chat_id = ? AND user_id = ? AND date = date('now')
+		`, chatID, userID)
+		return e
+	}, 3)
 	if err != nil {
 		return nil, errors.Join(errors.New("не удалось увеличить spam_counter"), err)
 	}
@@ -77,13 +80,16 @@ func (s *Storage) UpdateEffectiveLimit(chatID, userID int64, newLimit int) error
 	return nil
 }
 
-// MarkKicked помечает пользователя как кикнутого за текущие сутки.
+// MarkKicked помечает пользователя как кикнутого за текущие сутки (FR-013: retry при BUSY).
 func (s *Storage) MarkKicked(chatID, userID int64) error {
-	_, err := s.db.Exec(`
-		UPDATE spam_counter
-		SET kicked = 1, updated_at = datetime('now')
-		WHERE chat_id = ? AND user_id = ? AND date = date('now')
-	`, chatID, userID)
+	err := withSQLiteRetry(func() error {
+		_, e := s.db.Exec(`
+			UPDATE spam_counter
+			SET kicked = 1, updated_at = datetime('now')
+			WHERE chat_id = ? AND user_id = ? AND date = date('now')
+		`, chatID, userID)
+		return e
+	}, 3)
 	if err != nil {
 		return errors.Join(errors.New("не удалось пометить kicked"), err)
 	}

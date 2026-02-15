@@ -492,20 +492,16 @@ func (b *Bot) handleMessage(c tele.Context) error {
 	return b.handleSpamDetection(c)
 }
 
-// maxMessageAge — максимальный возраст сообщения для обработки.
-// Сообщения старше этого порога пропускаются (защита от webhook backlog при рестарте).
-const maxMessageAge = 30 * time.Second
-
 // handleSpamDetection обрабатывает сообщения в групповых чатах для обнаружения спама.
-// Поддерживает два режима детекции (FR-004): via_bot и sticker pack.
+// Поддерживает два режима: via_bot и sticker pack. Пропускает старые сообщения (FR-011).
 func (b *Bot) handleSpamDetection(c tele.Context) error {
 	msg := c.Message()
 	if msg == nil {
 		return nil
 	}
 
-	// пропускаем старые сообщения (webhook backlog после рестарта)
-	if time.Since(msg.Time()) > maxMessageAge {
+	// пропускаем старые сообщения — защита от webhook backlog (FR-011)
+	if time.Since(msg.Time()) > b.maxMessageAge {
 		return nil
 	}
 
@@ -590,10 +586,7 @@ func (b *Bot) handleSpamLegacy(c tele.Context, msg *tele.Message, cfg *storage.C
 		_ = b.storage.MarkKicked(chatID, msg.Sender.ID)
 
 	case storage.ActionFinalWarning, storage.ActionWarning:
-		replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
-		if sendErr != nil {
-			b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
-		} else if replyMsg != nil {
+		if replyMsg := b.sendReply(c, msg, result.Message); replyMsg != nil {
 			replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
 		}
 	}
@@ -629,19 +622,13 @@ func (b *Bot) handleSpamNew(c tele.Context, msg *tele.Message, cfg *storage.Chat
 
 		// отправляем текст предупреждения если есть
 		if result.Message != "" {
-			replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
-			if sendErr != nil {
-				b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
-			} else if replyMsg != nil {
+			if replyMsg := b.sendReply(c, msg, result.Message); replyMsg != nil {
 				replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
 			}
 		}
 
 	case storage.ActionFinalWarning, storage.ActionWarning:
-		replyMsg, sendErr := c.Bot().Reply(msg, result.Message)
-		if sendErr != nil {
-			b.logger.Error("send warning failed", "chat_id", chatID, "error", sendErr)
-		} else if replyMsg != nil {
+		if replyMsg := b.sendReply(c, msg, result.Message); replyMsg != nil {
 			replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
 		}
 	}
@@ -656,29 +643,49 @@ func (b *Bot) handleSpamNew(c tele.Context, msg *tele.Message, cfg *storage.Chat
 	return nil
 }
 
-// sendSticker отправляет стикер в ответ на спам-сообщение.
+// sendReply отправляет текстовый ответ с retry при FloodError.
+func (b *Bot) sendReply(c tele.Context, msg *tele.Message, text string) *tele.Message {
+	var replyMsg *tele.Message
+	err := withRetry(func() error {
+		var e error
+		replyMsg, e = c.Bot().Reply(msg, text)
+		return e
+	}, b.logger)
+	if err != nil {
+		b.logger.Error("send reply failed", "chat_id", c.Chat().ID, "error", err)
+		return nil
+	}
+	return replyMsg
+}
+
+// sendSticker отправляет стикер в ответ на спам-сообщение (FR-012: retry при 429).
 func (b *Bot) sendSticker(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) {
 	sticker := &tele.Sticker{File: tele.File{FileID: cfg.StickerFileID}}
-	_, err := c.Bot().Reply(msg, sticker)
+	err := withRetry(func() error {
+		_, e := c.Bot().Reply(msg, sticker)
+		return e
+	}, b.logger)
 	if err != nil {
 		b.logger.Error("send sticker failed", "chat_id", c.Chat().ID, "error", err)
 	}
 }
 
-// kickUser кикает пользователя из чата (ban + unban, FR-001).
+// kickUser кикает пользователя из чата (ban + unban, FR-001, FR-012: retry при 429).
 func (b *Bot) kickUser(c tele.Context, msg *tele.Message) {
 	chatID := c.Chat().ID
 	member := &tele.ChatMember{User: msg.Sender, RestrictedUntil: tele.Forever()}
 
-	// ban без удаления сообщений (FR-002)
-	err := c.Bot().Ban(c.Chat(), member, false)
+	err := withRetry(func() error {
+		return c.Bot().Ban(c.Chat(), member, false)
+	}, b.logger)
 	if err != nil {
 		b.logger.Error("ban failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
 		return
 	}
 
-	// unban для кика без постоянного бана
-	err = c.Bot().Unban(c.Chat(), msg.Sender, true)
+	err = withRetry(func() error {
+		return c.Bot().Unban(c.Chat(), msg.Sender, true)
+	}, b.logger)
 	if err != nil {
 		b.logger.Error("unban failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
 	}
@@ -694,10 +701,7 @@ func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatC
 	if cfg.TestMode {
 		// тестовый режим — только сообщение (FR-017)
 		testMsg := fmt.Sprintf("[ТЕСТ] Был бы restrict: %s", displayName(msg.Sender))
-		_, err := c.Bot().Reply(msg, testMsg)
-		if err != nil {
-			b.logger.Error("send test restrict message failed", "chat_id", chatID, "error", err)
-		}
+		b.sendReply(c, msg, testMsg)
 		b.logger.Info("test restrict", "chat_id", chatID, "user_id", msg.Sender.ID, "display_name", displayName(msg.Sender))
 		return
 	}

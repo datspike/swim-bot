@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -301,5 +302,45 @@ func TestGetStats_WithActions(t *testing.T) {
 
 	if !stats.LastTrigger.Valid {
 		t.Error("ожидал LastTrigger.Valid = true")
+	}
+}
+
+func TestWithSQLiteRetry_Success(t *testing.T) {
+	calls := 0
+	err := withSQLiteRetry(func() error {
+		calls++
+		return nil
+	}, 3)
+	if err != nil {
+		t.Errorf("ожидалось nil, получено %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("ожидался 1 вызов, получено %d", calls)
+	}
+}
+
+func TestWithSQLiteRetry_NonBusyError(t *testing.T) {
+	calls := 0
+	err := withSQLiteRetry(func() error {
+		calls++
+		return errors.New("some other error")
+	}, 3)
+	if err == nil {
+		t.Error("ожидалась ошибка")
+	}
+	if calls != 1 {
+		t.Errorf("ожидался 1 вызов (без повторов), получено %d", calls)
+	}
+}
+
+func TestIsBusyError(t *testing.T) {
+	if isBusyError(nil) {
+		t.Error("nil не должен быть busy error")
+	}
+	if !isBusyError(errors.New("SQLITE_BUSY: database is locked")) {
+		t.Error("SQLITE_BUSY должен распознаваться")
+	}
+	if isBusyError(errors.New("some other error")) {
+		t.Error("обычная ошибка не должна быть busy error")
 	}
 }
