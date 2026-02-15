@@ -27,6 +27,7 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 	migrations := []string{
 		"migrations/001_init.sql",
 		"migrations/002_smart_kick.sql",
+		"migrations/003_bot_hardening.sql",
 	}
 
 	// применяем миграции по порядку

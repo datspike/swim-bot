@@ -23,6 +23,9 @@ type ChatConfig struct {
 	ReactiveWindowMin    int
 	SpamDensityThreshold int
 	SpamDensityWindowMin int
+	TestMode             bool // тестовый режим: новая логика (restrict, ring buffer)
+	RingBufferSize       int  // M — размер скользящего окна сообщений
+	RingBufferThreshold  int  // N — порог спам-событий для reactive контекста
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
@@ -44,6 +47,7 @@ const (
 	ActionWarning      SpamAction = 1 // предупреждение с оставшимися попытками
 	ActionFinalWarning SpamAction = 2 // «наплавались» (0 попыток)
 	ActionKick         SpamAction = 3 // стикер + кик
+	ActionRestrict     SpamAction = 4 // restrict can_send_other_messages (новое поведение)
 )
 
 // SpamCounter содержит состояние счётчика спама пользователя в чате за день.
@@ -118,6 +122,7 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 		SELECT chat_id, tracked_bot, sticker_file_id, is_active,
 			tracked_sticker_pack, daily_limit, reactive_limit,
 			reactive_window_min, spam_density_threshold, spam_density_window_min,
+			test_mode, ring_buffer_size, ring_buffer_threshold,
 			created_at, updated_at
 		FROM chat_config
 		WHERE chat_id = ?
@@ -129,6 +134,7 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 		&cfg.ChatID, &cfg.TrackedBot, &cfg.StickerFileID, &cfg.IsActive,
 		&cfg.TrackedStickerPack, &cfg.DailyLimit, &cfg.ReactiveLimit,
 		&cfg.ReactiveWindowMin, &cfg.SpamDensityThreshold, &cfg.SpamDensityWindowMin,
+		&cfg.TestMode, &cfg.RingBufferSize, &cfg.RingBufferThreshold,
 		&createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
