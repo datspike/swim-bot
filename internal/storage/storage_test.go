@@ -183,7 +183,7 @@ func TestInsertActionLog(t *testing.T) {
 	}
 
 	// записываем срабатывание
-	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Int64: 101, Valid: true})
+	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Int64: 101, Valid: true}, ContextOrganic, ActionSticker)
 	if err != nil {
 		t.Fatalf("InsertActionLog failed: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestInsertActionLog_NullReplyMessageID(t *testing.T) {
 	}
 
 	// записываем срабатывание с NULL reply_message_id
-	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Valid: false})
+	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Valid: false}, ContextOrganic, ActionSticker)
 	if err != nil {
 		t.Fatalf("InsertActionLog failed: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestGetStats_WithActions(t *testing.T) {
 
 	// записываем несколько срабатываний
 	for i := 0; i < 5; i++ {
-		err = store.InsertActionLog(chatID, int64(1000+i), int64(100+i), sql.NullInt64{Int64: int64(200 + i), Valid: true})
+		err = store.InsertActionLog(chatID, int64(1000+i), int64(100+i), sql.NullInt64{Int64: int64(200 + i), Valid: true}, ContextOrganic, ActionSticker)
 		if err != nil {
 			t.Fatalf("InsertActionLog failed: %v", err)
 		}

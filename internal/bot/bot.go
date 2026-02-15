@@ -96,6 +96,8 @@ func (b *Bot) registerHandlers() {
 	// поэтому AdminOnly middleware будет применяться после парсинга
 	privateGroup.Handle("/setbot", b.handleSetBot)
 	privateGroup.Handle("/setsticker", b.handleSetSticker)
+	privateGroup.Handle("/setstickerpack", b.handleSetStickerPack)
+	privateGroup.Handle("/setlimits", b.handleSetLimits)
 	privateGroup.Handle("/stats", b.handleStats)
 
 	// все типы сообщений — единый роутер: приватные стикеры -> /setsticker flow, групповые -> спам-детекция
