@@ -1,0 +1,280 @@
+# Строгая конфигурация golangci-lint v2
+# Аналог Python ruff с маппингом категорий:
+#
+# | Python (ruff)   | Go (golangci-lint)              | Назначение           |
+# |-----------------|---------------------------------|----------------------|
+# | F, E, W         | govet, errcheck, staticcheck    | базовые проверки     |
+# | B (bugbear)     | gocritic                        | качество кода        |
+# | SIM (simplify)  | gosimple                        | упрощение            |
+# | PERF (perflint) | prealloc, ineffassign           | производительность   |
+# | S (bandit)      | gosec                           | безопасность         |
+# | T20 (no print)  | forbidigo                       | запрет fmt.Print*    |
+# | G, LOG          | loggercheck, sloglint           | дисциплина логов     |
+# | RET (return)    | revive (early-return, bare-return) | чистые возвраты   |
+# | PIE (dead code) | unused, unparam                 | мертвый код          |
+# | I (isort)       | goimports (formatter)           | порядок импортов     |
+#
+version: "2"
+
+# ---------------------------------------------------------------------------
+# Форматирование
+# ---------------------------------------------------------------------------
+formatters:
+  enable:
+    # I (isort) -> goimports: сортировка и группировка импортов
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: github.com/datspike/swim-bot
+
+# ---------------------------------------------------------------------------
+# Линтеры
+# ---------------------------------------------------------------------------
+linters:
+  # none - включаем только явно перечисленные
+  default: none
+
+  enable:
+    # --- F, E, W (Pyflakes + pycodestyle) -> базовые проверки ---
+    - govet         # vet: подозрительные конструкции, printf-форматирование, struct tags
+    - errcheck      # необработанные ошибки (аналог E501 по духу - "не игнорируй")
+    - staticcheck   # мега-набор проверок: неиспользуемый код, баги, упрощения
+
+    # --- B (flake8-bugbear) -> качество кода, ловля багов ---
+    - gocritic      # 100+ диагностик: баги, стиль, производительность
+
+    # --- SIM (flake8-simplify) -> упрощение кода ---
+    # gosimple теперь часть staticcheck в golangci-lint v2
+
+    # --- PERF (Perflint) -> производительность ---
+    - prealloc      # преаллокация слайсов там, где размер известен заранее
+    - ineffassign   # присваивания, результат которых никогда не читается
+
+    # --- S (bandit) -> безопасность ---
+    - gosec         # обнаружение проблем безопасности в исходном коде
+
+    # --- T20 (flake8-print) -> запрет отладочных принтов ---
+    - forbidigo     # запрет fmt.Print*, print(), println()
+
+    # --- G, LOG (flake8-logging-format) -> дисциплина логирования ---
+    - loggercheck   # проверка key-value пар в логгерах (zap, logr, slog, klog)
+    - sloglint      # единообразный стиль log/slog
+
+    # --- RET (flake8-return) -> чистые возвраты ---
+    - revive        # линтер с настраиваемыми правилами (включая return-правила)
+
+    # --- PIE (flake8-pie) -> мертвый код ---
+    - unused        # неиспользуемые константы, переменные, функции, типы
+    - unparam       # неиспользуемые параметры функций
+
+    # --- дополнительные полезные линтеры ---
+    - bodyclose     # незакрытые тела HTTP-ответов
+    # noctx отключен - для SQLite локального не критично
+    - errname       # соглашения именования ошибок (ErrFoo, fooError)
+    - errorlint     # корректное оборачивание и сравнение ошибок (%w, errors.Is/As)
+    - copyloopvar   # копирование переменной цикла (Go <1.22)
+    - nilerr        # возврат nil вместо ошибки после проверки err != nil
+    - exhaustive    # полнота switch по enum-типам
+
+  # ---------------------------------------------------------------------------
+  # Настройки линтеров
+  # ---------------------------------------------------------------------------
+  settings:
+
+    # --- govet: расширенные проверки ---
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # слишком строго для простых структур данных
+
+    # --- gocritic: аналог bugbear - все категории ---
+    gocritic:
+      enabled-tags:
+        - diagnostic   # поиск багов
+        - style        # стилистические проблемы
+        - performance  # проблемы производительности
+        - opinionated  # строгие, но полезные проверки
+      settings:
+        hugeParam:
+          # порог размера параметра в байтах (передача по значению)
+          sizeThreshold: 128
+        rangeValCopy:
+          sizeThreshold: 128
+
+    # --- gosec: аудит безопасности ---
+    gosec:
+      # включение режима аудита - максимально строгие проверки
+      config:
+        global:
+          audit: true
+
+    # --- forbidigo: запрет отладочных принтов (аналог T20) ---
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print.*$'
+          msg: >-
+            Не используй fmt.Print* в продакшн-коде.
+            Используй структурированный логгер (slog).
+        - pattern: '^print(ln)?$'
+          msg: >-
+            Встроенные print/println запрещены.
+            Используй структурированный логгер (slog).
+      analyze-types: true
+
+    # --- loggercheck: дисциплина логирования ---
+    loggercheck:
+      slog: true
+      zap: true
+      logr: true
+      kitlog: false
+      klog: false
+      require-string-key: true
+      no-printf-like: true
+
+    # --- sloglint: строгий стиль slog ---
+    sloglint:
+      # запрет смешивания key-value и slog.Attr в одном вызове
+      no-mixed-args: true
+      # запрет slog в глобальном scope без явного логгера
+      no-global: "all"
+      # статические строки в msg (без fmt.Sprintf)
+      static-msg: true
+      # именование ключей в snake_case
+      key-naming-case: snake
+
+    # --- revive: правила возвратов и параметров (аналог RET + PIE) ---
+    revive:
+      rules:
+        # RET: ранний возврат вместо вложенных if-else
+        - name: early-return
+          severity: warning
+        # RET: голый return только в именованных возвратах
+        - name: bare-return
+          severity: warning
+        # RET: лишние else после return/break/continue
+        - name: superfluous-else
+          severity: warning
+        # PIE: неиспользуемые параметры
+        - name: unused-parameter
+          severity: warning
+        # общее качество кода
+        - name: indent-error-flow
+          severity: warning
+        - name: error-return
+          severity: warning
+        - name: error-naming
+          severity: warning
+        - name: unexported-return
+          severity: warning
+        - name: blank-imports
+          severity: warning
+        - name: context-as-argument
+          severity: warning
+        - name: context-keys-type
+          severity: warning
+        - name: dot-imports
+          severity: warning
+        - name: empty-block
+          severity: warning
+        - name: errorf
+          severity: warning
+        - name: increment-decrement
+          severity: warning
+        - name: range
+          severity: warning
+        - name: receiver-naming
+          severity: warning
+        - name: redefines-builtin-id
+          severity: warning
+        - name: time-naming
+          severity: warning
+        - name: var-declaration
+          severity: warning
+        - name: var-naming
+          severity: warning
+
+    # --- prealloc: подсказки по преаллокации ---
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+    # --- exhaustive: полнота switch ---
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    # --- errcheck: не игнорировать ошибки ---
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+  # ---------------------------------------------------------------------------
+  # Исключения
+  # ---------------------------------------------------------------------------
+  exclusions:
+    # строгий режим для сгенерированного кода
+    generated: strict
+    # предупреждать о неиспользуемых исключениях
+    warn-unused: true
+    # стандартные пресеты исключений
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # тесты: ослабление строгих проверок
+      - path: _test\.go
+        linters:
+          - gosec       # в тестах безопасность менее критична
+          - errcheck    # в тестах допустимо игнорировать ошибки
+          - bodyclose   # в тестах допустимо не закрывать body
+          - noctx       # в тестах допустимо без контекста
+          - unparam     # в тестах часто бывают "лишние" параметры
+          - forbidigo   # в тестах допустим fmt.Println для отладки
+      # main.go: допустим fmt.Println для CLI-вывода
+      - path: main\.go
+        linters:
+          - forbidigo
+      # cmd/: допустим fmt.Println для CLI-вывода
+      - path: cmd/
+        linters:
+          - forbidigo
+
+# ---------------------------------------------------------------------------
+# Запуск
+# ---------------------------------------------------------------------------
+run:
+  timeout: 5m
+  tests: true
+
+# ---------------------------------------------------------------------------
+# Отчеты
+# ---------------------------------------------------------------------------
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+  sort-order:
+    - linter
+    - file
+  show-stats: true
+
+# ---------------------------------------------------------------------------
+# Лимиты
+# ---------------------------------------------------------------------------
+issues:
+  max-issues-per-linter: 0   # без лимита - показывать все
+  max-same-issues: 0         # без лимита - показывать все дубли
+
+# ---------------------------------------------------------------------------
+# Серьезность
+# ---------------------------------------------------------------------------
+severity:
+  default: error
+  rules:
+    - linters:
+        - revive
+      severity: warning
+    - linters:
+        - gocritic
+      severity: warning

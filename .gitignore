@@ -1,0 +1,30 @@
+# бинарники
+/swim-bot
+*.exe
+*.test
+*.out
+
+# зависимости (vendor не используется)
+vendor/
+
+# окружение и данные
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.vscode/
+.idea/
+
+# система
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+.ralph
+.claude
+specs/
+ralph.yml

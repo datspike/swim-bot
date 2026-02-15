@@ -1,0 +1,23 @@
+[Unit]
+Description=Swim Anti-Spam Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=spike
+Group=spike
+WorkingDirectory=/opt/swim-bot
+EnvironmentFile=/opt/swim-bot/.env
+ExecStart=/opt/swim-bot/swim-bot
+Restart=on-failure
+RestartSec=5
+
+# Безопасность
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/opt/swim-bot
+
+[Install]
+WantedBy=multi-user.target
