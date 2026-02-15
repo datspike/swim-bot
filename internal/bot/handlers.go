@@ -399,11 +399,20 @@ func (b *Bot) handleMessage(c tele.Context) error {
 	return b.handleSpamDetection(c)
 }
 
+// maxMessageAge — максимальный возраст сообщения для обработки.
+// Сообщения старше этого порога пропускаются (защита от webhook backlog при рестарте).
+const maxMessageAge = 30 * time.Second
+
 // handleSpamDetection обрабатывает сообщения в групповых чатах для обнаружения спама.
 // Поддерживает два режима детекции (FR-004): via_bot и sticker pack.
 func (b *Bot) handleSpamDetection(c tele.Context) error {
 	msg := c.Message()
 	if msg == nil {
+		return nil
+	}
+
+	// пропускаем старые сообщения (webhook backlog после рестарта)
+	if time.Since(msg.Time()) > maxMessageAge {
 		return nil
 	}
 
@@ -438,10 +447,13 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 	}
 
 	// проверяем роль — администраторы освобождены (FR-003)
+	// при ошибке API — пропускаем сообщение (не кикаем при неизвестной роли)
 	member, err := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
 	if err != nil {
-		b.logger.Warn("admin check failed in spam detection", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
-	} else if member.Role == tele.Administrator || member.Role == tele.Creator {
+		b.logger.Warn("admin check failed in spam detection, skipping", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
+		return nil
+	}
+	if member.Role == tele.Administrator || member.Role == tele.Creator {
 		return nil
 	}
 
