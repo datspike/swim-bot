@@ -13,12 +13,47 @@ import (
 
 // ChatConfig содержит конфигурацию бота для конкретного чата.
 type ChatConfig struct {
-	ChatID        int64
-	TrackedBot    string
-	StickerFileID string
-	IsActive      bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ChatID               int64
+	TrackedBot           string
+	StickerFileID        string
+	IsActive             bool
+	TrackedStickerPack   string
+	DailyLimit           int
+	ReactiveLimit        int
+	ReactiveWindowMin    int
+	SpamDensityThreshold int
+	SpamDensityWindowMin int
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// MessageContext определяет контекст спам-сообщения.
+type MessageContext int
+
+const (
+	ContextOrganic  MessageContext = 0 // органическое
+	ContextReactive MessageContext = 1 // реактивное
+	ContextSpamWave MessageContext = 2 // спам-волна
+)
+
+// SpamAction определяет действие бота при спаме.
+type SpamAction int
+
+const (
+	ActionSticker      SpamAction = 0 // стикер (старое поведение)
+	ActionWarning      SpamAction = 1 // предупреждение с оставшимися попытками
+	ActionFinalWarning SpamAction = 2 // «наплавались» (0 попыток)
+	ActionKick         SpamAction = 3 // стикер + кик
+)
+
+// SpamCounter содержит состояние счётчика спама пользователя в чате за день.
+type SpamCounter struct {
+	ChatID         int64
+	UserID         int64
+	Date           string // YYYY-MM-DD
+	Count          int
+	EffectiveLimit int
+	Kicked         bool
 }
 
 // ActionLog содержит запись о срабатывании бота.
@@ -80,14 +115,22 @@ func (s *Storage) Close() error {
 // Возвращает nil, nil если конфигурация не найдена.
 func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 	row := s.db.QueryRow(`
-		SELECT chat_id, tracked_bot, sticker_file_id, is_active, created_at, updated_at
+		SELECT chat_id, tracked_bot, sticker_file_id, is_active,
+			tracked_sticker_pack, daily_limit, reactive_limit,
+			reactive_window_min, spam_density_threshold, spam_density_window_min,
+			created_at, updated_at
 		FROM chat_config
 		WHERE chat_id = ?
 	`, chatID)
 
 	var cfg ChatConfig
 	var createdAt, updatedAt string
-	err := row.Scan(&cfg.ChatID, &cfg.TrackedBot, &cfg.StickerFileID, &cfg.IsActive, &createdAt, &updatedAt)
+	err := row.Scan(
+		&cfg.ChatID, &cfg.TrackedBot, &cfg.StickerFileID, &cfg.IsActive,
+		&cfg.TrackedStickerPack, &cfg.DailyLimit, &cfg.ReactiveLimit,
+		&cfg.ReactiveWindowMin, &cfg.SpamDensityThreshold, &cfg.SpamDensityWindowMin,
+		&createdAt, &updatedAt,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -141,11 +184,11 @@ func (s *Storage) UpsertStickerFileID(chatID int64, stickerFileID string) error 
 }
 
 // InsertActionLog записывает срабатывание бота в лог.
-func (s *Storage) InsertActionLog(chatID, userID, spamMessageID int64, replyMessageID sql.NullInt64) error {
+func (s *Storage) InsertActionLog(chatID, userID, spamMessageID int64, replyMessageID sql.NullInt64, ctx MessageContext, action SpamAction) error {
 	_, err := s.db.Exec(`
-		INSERT INTO action_log (chat_id, user_id, spam_message_id, reply_message_id)
-		VALUES (?, ?, ?, ?)
-	`, chatID, userID, spamMessageID, replyMessageID)
+		INSERT INTO action_log (chat_id, user_id, spam_message_id, reply_message_id, context, action)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, chatID, userID, spamMessageID, replyMessageID, ctx, action)
 	if err != nil {
 		return errors.Join(errors.New("не удалось записать в action_log"), err)
 	}

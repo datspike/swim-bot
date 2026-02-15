@@ -234,7 +234,7 @@ func TestStats_WithTriggers(t *testing.T) {
 
 	// добавляем срабатывания
 	for i := 0; i < 3; i++ {
-		_ = store.InsertActionLog(chatID, int64(1000+i), int64(i), sql.NullInt64{Int64: int64(100 + i), Valid: true})
+		_ = store.InsertActionLog(chatID, int64(1000+i), int64(i), sql.NullInt64{Int64: int64(100 + i), Valid: true}, storage.ContextOrganic, storage.ActionSticker)
 	}
 
 	stats, err := store.GetStats(chatID)
