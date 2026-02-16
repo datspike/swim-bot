@@ -13,21 +13,15 @@ import (
 
 // ChatConfig содержит конфигурацию бота для конкретного чата.
 type ChatConfig struct {
-	ChatID               int64
-	TrackedBot           string
-	StickerFileID        string
-	IsActive             bool
-	TrackedStickerPack   string
-	DailyLimit           int
-	ReactiveLimit        int
-	ReactiveWindowMin    int
-	SpamDensityThreshold int
-	SpamDensityWindowMin int
-	TestMode             bool // тестовый режим: новая логика (restrict, ring buffer)
-	RingBufferSize       int  // M — размер скользящего окна сообщений
-	RingBufferThreshold  int  // N — порог спам-событий для reactive контекста
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	ChatID              int64
+	TrackedBot          string
+	IsActive            bool
+	DailyLimit          int
+	TestMode            bool // тестовый режим: отладочный вывод [ТЕСТ M/N rb:X/Y] + protect admins
+	RingBufferSize      int  // M — размер скользящего окна сообщений
+	RingBufferThreshold int  // N — порог спам-событий для reactive контекста
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // MessageContext определяет контекст спам-сообщения.
@@ -36,18 +30,14 @@ type MessageContext int
 const (
 	ContextOrganic  MessageContext = 0 // органическое
 	ContextReactive MessageContext = 1 // реактивное
-	ContextSpamWave MessageContext = 2 // спам-волна
 )
 
 // SpamAction определяет действие бота при спаме.
 type SpamAction int
 
 const (
-	ActionSticker      SpamAction = 0 // стикер (старое поведение)
-	ActionWarning      SpamAction = 1 // предупреждение с оставшимися попытками
-	ActionFinalWarning SpamAction = 2 // «наплавались» (0 попыток)
-	ActionKick         SpamAction = 3 // стикер + кик
-	ActionRestrict     SpamAction = 4 // restrict can_send_other_messages (новое поведение)
+	ActionWarning  SpamAction = 1 // предупреждение с оставшимися попытками
+	ActionRestrict SpamAction = 4 // restrict can_send_other_messages
 )
 
 // SpamCounter содержит состояние счётчика спама пользователя в чате за день.
@@ -140,10 +130,8 @@ func (s *Storage) Close() error {
 // Возвращает nil, nil если конфигурация не найдена.
 func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 	row := s.db.QueryRow(`
-		SELECT chat_id, tracked_bot, sticker_file_id, is_active,
-			tracked_sticker_pack, daily_limit, reactive_limit,
-			reactive_window_min, spam_density_threshold, spam_density_window_min,
-			test_mode, ring_buffer_size, ring_buffer_threshold,
+		SELECT chat_id, tracked_bot, is_active,
+			daily_limit, test_mode, ring_buffer_size, ring_buffer_threshold,
 			created_at, updated_at
 		FROM chat_config
 		WHERE chat_id = ?
@@ -152,10 +140,8 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 	var cfg ChatConfig
 	var createdAt, updatedAt string
 	err := row.Scan(
-		&cfg.ChatID, &cfg.TrackedBot, &cfg.StickerFileID, &cfg.IsActive,
-		&cfg.TrackedStickerPack, &cfg.DailyLimit, &cfg.ReactiveLimit,
-		&cfg.ReactiveWindowMin, &cfg.SpamDensityThreshold, &cfg.SpamDensityWindowMin,
-		&cfg.TestMode, &cfg.RingBufferSize, &cfg.RingBufferThreshold,
+		&cfg.ChatID, &cfg.TrackedBot, &cfg.IsActive,
+		&cfg.DailyLimit, &cfg.TestMode, &cfg.RingBufferSize, &cfg.RingBufferThreshold,
 		&createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -179,10 +165,11 @@ func (s *Storage) UpsertTrackedBot(chatID int64, trackedBot string) (bool, error
 	trackedBot = strings.TrimPrefix(strings.ToLower(trackedBot), "@")
 
 	result, err := s.db.Exec(`
-		INSERT INTO chat_config (chat_id, tracked_bot, updated_at)
-		VALUES (?, ?, datetime('now'))
+		INSERT INTO chat_config (chat_id, tracked_bot, is_active, updated_at)
+		VALUES (?, ?, 1, datetime('now'))
 		ON CONFLICT(chat_id) DO UPDATE SET
 			tracked_bot = excluded.tracked_bot,
+			is_active = 1,
 			updated_at = datetime('now')
 	`, chatID, trackedBot)
 	if err != nil {
@@ -193,19 +180,11 @@ func (s *Storage) UpsertTrackedBot(chatID int64, trackedBot string) (bool, error
 	return rowsAffected > 0, nil
 }
 
-// UpsertStickerFileID создаёт или обновляет sticker_file_id для чата.
-// Активирует бота (is_active=1) если tracked_bot уже задан.
-func (s *Storage) UpsertStickerFileID(chatID int64, stickerFileID string) error {
-	_, err := s.db.Exec(`
-		INSERT INTO chat_config (chat_id, sticker_file_id, updated_at)
-		VALUES (?, ?, datetime('now'))
-		ON CONFLICT(chat_id) DO UPDATE SET
-			sticker_file_id = excluded.sticker_file_id,
-			is_active = CASE WHEN tracked_bot != '' THEN 1 ELSE 0 END,
-			updated_at = datetime('now')
-	`, chatID, stickerFileID)
+// ActivateConfiguredChats — startup-миграция: активация чатов с tracked_bot, ожидавших стикер.
+func (s *Storage) ActivateConfiguredChats() error {
+	_, err := s.db.Exec(`UPDATE chat_config SET is_active = 1 WHERE tracked_bot != ''`)
 	if err != nil {
-		return errors.Join(errors.New("не удалось сохранить sticker_file_id"), err)
+		return errors.Join(errors.New("не удалось активировать настроенные чаты"), err)
 	}
 	return nil
 }

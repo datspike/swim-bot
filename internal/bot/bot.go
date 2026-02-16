@@ -99,23 +99,15 @@ func (b *Bot) registerHandlers() {
 	privateGroup.Handle("/start", b.handleStart)
 	privateGroup.Handle("/help", b.handleHelp)
 
-	// команды с проверкой прав администратора
-	adminGroup := b.bot.Group()
-	adminGroup.Use(PrivateOnly())
-	adminGroup.Use(AdminOnly(b.logger))
-
-	// /setbot и /setsticker требуют парсинга chat_id из аргументов,
-	// поэтому AdminOnly middleware будет применяться после парсинга
+	// команды с проверкой прав администратора (парсинг chat_id внутри хендлера)
 	privateGroup.Handle("/setbot", b.handleSetBot)
-	privateGroup.Handle("/setsticker", b.handleSetSticker)
-	privateGroup.Handle("/setstickerpack", b.handleSetStickerPack)
 	privateGroup.Handle("/setlimits", b.handleSetLimits)
+	privateGroup.Handle("/getlimits", b.handleGetLimits)
 	privateGroup.Handle("/stats", b.handleStats)
 	privateGroup.Handle("/testmode", b.handleTestMode)
-	privateGroup.Handle("/delsticker", b.handleDelSticker)
 	privateGroup.Handle("/resetcounters", b.handleResetCounters)
 
-	// все типы сообщений — единый роутер: приватные стикеры -> /setsticker flow, групповые -> спам-детекция
+	// все типы сообщений — единый роутер: спам-детекция
 	for _, event := range []string{tele.OnText, tele.OnPhoto, tele.OnDocument, tele.OnSticker, tele.OnVideo, tele.OnAnimation} {
 		b.bot.Handle(event, b.handleMessage)
 	}
@@ -134,12 +126,4 @@ func makeErrorHandler(logger *slog.Logger) func(error, tele.Context) {
 		}
 		logger.Error("telebot error", "error", err, "chat_id", chatID, "user_id", userID)
 	}
-}
-
-// StickerAwait хранит состояние ожидания стикера для команды /setsticker.
-type StickerAwait struct {
-	UserID   int64
-	ChatID   int64
-	Expires  time.Time
-	ChatName string
 }

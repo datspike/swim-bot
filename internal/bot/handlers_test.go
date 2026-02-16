@@ -34,37 +34,23 @@ func setupTestStorage(t *testing.T) *storage.Storage {
 	return store
 }
 
-// Примечание: полноценные тесты хендлеров требуют мокирования telebot.Context,
-// что достаточно сложно из-за архитектуры библиотеки.
-// Здесь мы тестируем логику storage, которая используется хендлерами.
-
 func TestSpamDetection_ViaBot_StorageLogic(t *testing.T) {
 	tests := []struct {
 		name         string
 		trackedBot   string
 		viaUsername  string
-		isActive     bool
 		shouldDetect bool
 	}{
 		{
 			name:         "matching via_bot",
 			trackedBot:   "mlversebot",
 			viaUsername:  "mlversebot",
-			isActive:     true,
 			shouldDetect: true,
 		},
 		{
 			name:         "wrong via_bot",
 			trackedBot:   "mlversebot",
 			viaUsername:  "otherbot",
-			isActive:     true,
-			shouldDetect: false,
-		},
-		{
-			name:         "inactive config",
-			trackedBot:   "mlversebot",
-			viaUsername:  "mlversebot",
-			isActive:     false, // только tracked_bot, без стикера
 			shouldDetect: false,
 		},
 	}
@@ -74,20 +60,12 @@ func TestSpamDetection_ViaBot_StorageLogic(t *testing.T) {
 			store := setupTestStorage(t)
 			chatID := int64(-100001)
 
-			// настраиваем чат
+			// UpsertTrackedBot теперь сразу активирует
 			_, err := store.UpsertTrackedBot(chatID, tt.trackedBot)
 			if err != nil {
 				t.Fatalf("UpsertTrackedBot failed: %v", err)
 			}
 
-			if tt.isActive {
-				err = store.UpsertStickerFileID(chatID, "sticker123")
-				if err != nil {
-					t.Fatalf("UpsertStickerFileID failed: %v", err)
-				}
-			}
-
-			// проверяем логику детекции
 			cfg, err := store.GetChatConfig(chatID)
 			if err != nil {
 				t.Fatalf("GetChatConfig failed: %v", err)
@@ -107,13 +85,11 @@ func TestSpamDetection_ViaBot_StorageLogic(t *testing.T) {
 func TestSpamDetection_NoChatConfig(t *testing.T) {
 	store := setupTestStorage(t)
 
-	// чат не настроен
 	cfg, err := store.GetChatConfig(-999999)
 	if err != nil {
 		t.Fatalf("GetChatConfig failed: %v", err)
 	}
 
-	// конфиг nil — спам не детектится
 	if cfg != nil {
 		t.Error("ожидал nil config для ненастроенного чата")
 	}
@@ -164,42 +140,22 @@ func TestSetBot_UsernameNormalization(t *testing.T) {
 	}
 }
 
-func TestSetSticker_ActivatesBot(t *testing.T) {
+func TestSetBot_ActivatesBot(t *testing.T) {
 	store := setupTestStorage(t)
 	chatID := int64(-100001)
 
-	// без tracked_bot — бот не активируется
-	err := store.UpsertStickerFileID(chatID, "sticker1")
+	_, err := store.UpsertTrackedBot(chatID, "spambot")
 	if err != nil {
-		t.Fatalf("UpsertStickerFileID failed: %v", err)
+		t.Fatalf("UpsertTrackedBot failed: %v", err)
 	}
 
 	cfg, err := store.GetChatConfig(chatID)
 	if err != nil {
 		t.Fatalf("GetChatConfig failed: %v", err)
 	}
-	if cfg.IsActive {
-		t.Error("бот не должен быть активен без tracked_bot")
-	}
 
-	// добавляем tracked_bot
-	_, err = store.UpsertTrackedBot(chatID, "spambot")
-	if err != nil {
-		t.Fatalf("UpsertTrackedBot failed: %v", err)
-	}
-
-	// обновляем стикер — теперь должен активироваться
-	err = store.UpsertStickerFileID(chatID, "sticker2")
-	if err != nil {
-		t.Fatalf("UpsertStickerFileID failed: %v", err)
-	}
-
-	cfg, err = store.GetChatConfig(chatID)
-	if err != nil {
-		t.Fatalf("GetChatConfig failed: %v", err)
-	}
 	if !cfg.IsActive {
-		t.Error("бот должен быть активен после задания tracked_bot и стикера")
+		t.Error("бот должен быть активен сразу после /setbot")
 	}
 }
 
@@ -228,13 +184,11 @@ func TestStats_WithTriggers(t *testing.T) {
 	store := setupTestStorage(t)
 	chatID := int64(-100001)
 
-	// настраиваем чат
 	_, _ = store.UpsertTrackedBot(chatID, "spambot")
-	_ = store.UpsertStickerFileID(chatID, "sticker")
 
 	// добавляем срабатывания
 	for i := 0; i < 3; i++ {
-		_ = store.InsertActionLog(chatID, int64(1000+i), int64(i), sql.NullInt64{Int64: int64(100 + i), Valid: true}, storage.ContextOrganic, storage.ActionSticker)
+		_ = store.InsertActionLog(chatID, int64(1000+i), int64(i), sql.NullInt64{Int64: int64(100 + i), Valid: true}, storage.ContextOrganic, storage.ActionWarning)
 	}
 
 	stats, err := store.GetStats(chatID)

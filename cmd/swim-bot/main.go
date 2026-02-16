@@ -45,6 +45,11 @@ func run() error {
 		return fmt.Errorf("не удалось выполнить миграции: %w", migrateErr)
 	}
 
+	// активация чатов с tracked_bot, ожидавших стикер
+	if activateErr := store.ActivateConfiguredChats(); activateErr != nil {
+		return fmt.Errorf("не удалось активировать настроенные чаты: %w", activateErr)
+	}
+
 	// создание бота
 	b, err := bot.New(bot.Config{
 		Token:         cfg.TelegramToken,
@@ -58,9 +63,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("не удалось создать бота: %w", err)
 	}
-
-	// запуск очистки просроченных ожиданий стикеров
-	bot.StartStickerAwaitCleanup()
 
 	// graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

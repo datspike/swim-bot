@@ -26,9 +26,9 @@ tests/
 Go 1.22+: Follow standard conventions
 
 ## Recent Changes
+- 004-cleanup-legacy: Added Go 1.25.6 (go.mod) + gopkg.in/telebot.v3 v3.3.8, modernc.org/sqlite v1.45.0
 - 003-bot-hardening: Added Go 1.25.6 (go.mod) + gopkg.in/telebot.v3 v3.3.8, modernc.org/sqlite v1.45.0
 - 003-bot-hardening: Added Go 1.22+ (go.mod: 1.25.6) + gopkg.in/telebot.v3 v3.3.8, modernc.org/sqlite v1.45.0
-- 002-smart-kick: Added Go 1.22+ (go.mod: 1.25.6) + gopkg.in/telebot.v3 v3.3.8, modernc.org/sqlite v1.45.0
 
 
 <!-- MANUAL ADDITIONS START -->
@@ -37,7 +37,17 @@ Go 1.22+: Follow standard conventions
 
 ## Скиллы проекта
 
-.claude/skills/ в корне проекта нужно не забывать
+Spec-kit скиллы:
+/home/spike/hobby/swim-bot/.claude/skills/
+- speckit-analyze
+- speckit-checklist
+- speckit-clarify
+- speckit-constitution
+- speckit-implement
+- speckit-plan
+- speckit-specify
+- speckit-tasks
+- speckit-taskstoissues
 
 ## Деплой
 

@@ -90,8 +90,8 @@ func TestUpsertTrackedBot(t *testing.T) {
 				t.Errorf("TrackedBot = %q, want %q", cfg.TrackedBot, tt.wantBot)
 			}
 
-			if cfg.IsActive {
-				t.Error("ожидал is_active = false (стикер не задан)")
+			if !cfg.IsActive {
+				t.Error("ожидал is_active = true после UpsertTrackedBot")
 			}
 		})
 	}
@@ -101,13 +101,11 @@ func TestUpsertTrackedBot_Update(t *testing.T) {
 	store := setupTestDB(t)
 	chatID := int64(-100001)
 
-	// первая вставка
 	_, err := store.UpsertTrackedBot(chatID, "oldbot")
 	if err != nil {
 		t.Fatalf("первый UpsertTrackedBot failed: %v", err)
 	}
 
-	// обновление
 	_, err = store.UpsertTrackedBot(chatID, "newbot")
 	if err != nil {
 		t.Fatalf("второй UpsertTrackedBot failed: %v", err)
@@ -123,73 +121,20 @@ func TestUpsertTrackedBot_Update(t *testing.T) {
 	}
 }
 
-func TestUpsertStickerFileID_ActivatesBot(t *testing.T) {
-	store := setupTestDB(t)
-	chatID := int64(-100001)
-
-	// сначала задаём tracked_bot
-	_, err := store.UpsertTrackedBot(chatID, "spambot")
-	if err != nil {
-		t.Fatalf("UpsertTrackedBot failed: %v", err)
-	}
-
-	// затем задаём стикер — бот должен активироваться
-	err = store.UpsertStickerFileID(chatID, "CAACAgIAAxkB123")
-	if err != nil {
-		t.Fatalf("UpsertStickerFileID failed: %v", err)
-	}
-
-	cfg, err := store.GetChatConfig(chatID)
-	if err != nil {
-		t.Fatalf("GetChatConfig failed: %v", err)
-	}
-
-	if !cfg.IsActive {
-		t.Error("ожидал is_active = true после задания стикера")
-	}
-
-	if cfg.StickerFileID != "CAACAgIAAxkB123" {
-		t.Errorf("StickerFileID = %q, want %q", cfg.StickerFileID, "CAACAgIAAxkB123")
-	}
-}
-
-func TestUpsertStickerFileID_WithoutTrackedBot(t *testing.T) {
-	store := setupTestDB(t)
-	chatID := int64(-100001)
-
-	// задаём стикер БЕЗ tracked_bot — бот НЕ должен активироваться
-	err := store.UpsertStickerFileID(chatID, "CAACAgIAAxkB123")
-	if err != nil {
-		t.Fatalf("UpsertStickerFileID failed: %v", err)
-	}
-
-	cfg, err := store.GetChatConfig(chatID)
-	if err != nil {
-		t.Fatalf("GetChatConfig failed: %v", err)
-	}
-
-	if cfg.IsActive {
-		t.Error("ожидал is_active = false (tracked_bot не задан)")
-	}
-}
-
 func TestInsertActionLog(t *testing.T) {
 	store := setupTestDB(t)
 	chatID := int64(-100001)
 
-	// создаём конфиг (для foreign key)
 	_, err := store.UpsertTrackedBot(chatID, "spambot")
 	if err != nil {
 		t.Fatalf("UpsertTrackedBot failed: %v", err)
 	}
 
-	// записываем срабатывание
-	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Int64: 101, Valid: true}, ContextOrganic, ActionSticker)
+	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Int64: 101, Valid: true}, ContextOrganic, ActionWarning)
 	if err != nil {
 		t.Fatalf("InsertActionLog failed: %v", err)
 	}
 
-	// проверяем через GetStats
 	stats, err := store.GetStats(chatID)
 	if err != nil {
 		t.Fatalf("GetStats failed: %v", err)
@@ -204,14 +149,12 @@ func TestInsertActionLog_NullReplyMessageID(t *testing.T) {
 	store := setupTestDB(t)
 	chatID := int64(-100001)
 
-	// создаём конфиг
 	_, err := store.UpsertTrackedBot(chatID, "spambot")
 	if err != nil {
 		t.Fatalf("UpsertTrackedBot failed: %v", err)
 	}
 
-	// записываем срабатывание с NULL reply_message_id
-	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Valid: false}, ContextOrganic, ActionSticker)
+	err = store.InsertActionLog(chatID, 12345, 100, sql.NullInt64{Valid: false}, ContextOrganic, ActionWarning)
 	if err != nil {
 		t.Fatalf("InsertActionLog failed: %v", err)
 	}
@@ -231,7 +174,6 @@ func TestChatConfig_NewFields_Defaults(t *testing.T) {
 		t.Fatalf("GetChatConfig failed: %v", err)
 	}
 
-	// дефолтные значения из миграции 003
 	if cfg.TestMode {
 		t.Error("TestMode: ожидалось false по умолчанию")
 	}
@@ -264,20 +206,14 @@ func TestGetStats_WithActions(t *testing.T) {
 	store := setupTestDB(t)
 	chatID := int64(-100001)
 
-	// настраиваем чат
 	_, err := store.UpsertTrackedBot(chatID, "spambot")
 	if err != nil {
 		t.Fatalf("UpsertTrackedBot failed: %v", err)
 	}
 
-	err = store.UpsertStickerFileID(chatID, "sticker123")
-	if err != nil {
-		t.Fatalf("UpsertStickerFileID failed: %v", err)
-	}
-
-	// записываем несколько срабатываний
 	for i := 0; i < 5; i++ {
-		err = store.InsertActionLog(chatID, int64(1000+i), int64(100+i), sql.NullInt64{Int64: int64(200 + i), Valid: true}, ContextOrganic, ActionSticker)
+		err = store.InsertActionLog(chatID, int64(1000+i), int64(100+i),
+			sql.NullInt64{Int64: int64(200 + i), Valid: true}, ContextOrganic, ActionWarning)
 		if err != nil {
 			t.Fatalf("InsertActionLog failed: %v", err)
 		}
@@ -302,6 +238,37 @@ func TestGetStats_WithActions(t *testing.T) {
 
 	if !stats.LastTrigger.Valid {
 		t.Error("ожидал LastTrigger.Valid = true")
+	}
+}
+
+func TestActivateConfiguredChats(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+
+	// создаём запись напрямую через SQL (эмулируя старую версию, где is_active=0)
+	_, err := store.db.Exec(`
+		INSERT INTO chat_config (chat_id, tracked_bot, is_active) VALUES (?, ?, 0)
+	`, chatID, "spambot")
+	if err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+
+	// проверяем что is_active=0
+	cfg, _ := store.GetChatConfig(chatID)
+	if cfg.IsActive {
+		t.Fatal("ожидался is_active=false до миграции")
+	}
+
+	// запускаем миграцию
+	err = store.ActivateConfiguredChats()
+	if err != nil {
+		t.Fatalf("ActivateConfiguredChats failed: %v", err)
+	}
+
+	// проверяем что is_active=1
+	cfg, _ = store.GetChatConfig(chatID)
+	if !cfg.IsActive {
+		t.Error("ожидался is_active=true после ActivateConfiguredChats")
 	}
 }
 
