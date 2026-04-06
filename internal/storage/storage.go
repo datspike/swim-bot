@@ -20,6 +20,8 @@ type ChatConfig struct {
 	TestMode            bool // тестовый режим: отладочный вывод [ТЕСТ M/N rb:X/Y] + protect admins
 	RingBufferSize      int  // M — размер скользящего окна сообщений
 	RingBufferThreshold int  // N — порог спам-событий для reactive контекста
+	CommunityBanEnabled bool
+	SpamLogChatID       int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -132,6 +134,7 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 	row := s.db.QueryRow(`
 		SELECT chat_id, tracked_bot, is_active,
 			daily_limit, test_mode, ring_buffer_size, ring_buffer_threshold,
+			community_ban_enabled, spam_log_chat_id,
 			created_at, updated_at
 		FROM chat_config
 		WHERE chat_id = ?
@@ -142,6 +145,7 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 	err := row.Scan(
 		&cfg.ChatID, &cfg.TrackedBot, &cfg.IsActive,
 		&cfg.DailyLimit, &cfg.TestMode, &cfg.RingBufferSize, &cfg.RingBufferThreshold,
+		&cfg.CommunityBanEnabled, &cfg.SpamLogChatID,
 		&createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

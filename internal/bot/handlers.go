@@ -18,6 +18,8 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 Для настройки добавь меня в чат как администратора, затем:
 1. /setbot <chat_id> @username — указать спам-бота
+2. /setcommunityban <chat_id> on|off — включить голосование против цитатного спама
+3. /setspamlog <chat_id> <target_chat_id> — указать чат для логов community-ban
 
 /help — подробная справка`
 
@@ -52,6 +54,18 @@ func (b *Bot) handleHelp(c tele.Context) error {
 Показать статистику срабатываний.
 Пример: /stats -100123456789
 
+/setcommunityban <chat_id> on|off
+Включить/выключить community-ban для цитатного спама.
+Пример: /setcommunityban -100123456789 on
+
+/setspamlog <chat_id> <target_chat_id>
+Настроить чат для логов и копий community-ban кейсов.
+Пример: /setspamlog -100123456789 -100987654321
+
+/communitybanstatus <chat_id>
+Показать состояние community-ban и log chat.
+Пример: /communitybanstatus -100123456789
+
 Как узнать chat_id:
 1. Добавь @raw_data_bot в чат
 2. Отправь любое сообщение
@@ -60,7 +74,8 @@ func (b *Bot) handleHelp(c tele.Context) error {
 Как это работает:
 1. Добавь меня в чат как администратора
 2. Настрой /setbot
-3. Пользователь спамит -> предупреждения -> restrict до конца дня`
+3. Пользователь спамит -> предупреждения -> restrict до конца дня
+4. Для цитатного спама можно включить community-ban с голосованием участников`
 
 	return c.Send(msg)
 }
@@ -373,6 +388,121 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Сброшено %d счётчиков для чата %d", affected, chatID))
 }
 
+// handleSetCommunityBan обрабатывает команду /setcommunityban <chat_id> on|off.
+func (b *Bot) handleSetCommunityBan(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /setcommunityban <chat_id> on|off")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+
+	mode := strings.ToLower(args[1])
+	if mode != "on" && mode != "off" {
+		return c.Send("Использование: /setcommunityban <chat_id> on|off")
+	}
+
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("setcommunityban admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	enabled := mode == "on"
+	if err := b.storage.SetCommunityBanEnabled(chatID, enabled); err != nil {
+		b.logger.Error("set community ban failed", "chat_id", chatID, "enabled", enabled, "error", err)
+		return c.Send("Не удалось обновить настройки community-ban.")
+	}
+
+	b.logger.Info("community ban updated", "chat_id", chatID, "enabled", enabled, "by_user", c.Sender().ID)
+	if enabled {
+		return c.Send(fmt.Sprintf("Community-ban включён для чата %d", chatID))
+	}
+	return c.Send(fmt.Sprintf("Community-ban выключен для чата %d", chatID))
+}
+
+// handleSetSpamLog обрабатывает команду /setspamlog <chat_id> <target_chat_id>.
+func (b *Bot) handleSetSpamLog(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /setspamlog <chat_id> <target_chat_id>")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+	targetChatID, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		return c.Send("Неверный target_chat_id. Используй числовой ID чата.")
+	}
+
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("setspamlog admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	if err := b.storage.SetSpamLogChatID(chatID, targetChatID); err != nil {
+		b.logger.Error("set spam log failed", "chat_id", chatID, "target_chat_id", targetChatID, "error", err)
+		return c.Send("Не удалось сохранить чат для логов.")
+	}
+
+	b.logger.Info("spam log chat updated", "chat_id", chatID, "target_chat_id", targetChatID, "by_user", c.Sender().ID)
+	return c.Send(fmt.Sprintf("Лог community-ban для чата %d -> %d", chatID, targetChatID))
+}
+
+// handleCommunityBanStatus обрабатывает команду /communitybanstatus <chat_id>.
+func (b *Bot) handleCommunityBanStatus(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("Использование: /communitybanstatus <chat_id>")
+	}
+
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("communitybanstatus admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	cfg, err := b.storage.GetChatConfig(chatID)
+	if err != nil {
+		b.logger.Error("communitybanstatus get config failed", "chat_id", chatID, "error", err)
+		return c.Send("Не удалось получить настройки.")
+	}
+	if cfg == nil {
+		return c.Send(fmt.Sprintf("Чат %d не настроен.", chatID))
+	}
+
+	status := "off"
+	if cfg.CommunityBanEnabled {
+		status = "on"
+	}
+	logChat := "не задан"
+	if cfg.SpamLogChatID != 0 {
+		logChat = strconv.FormatInt(cfg.SpamLogChatID, 10)
+	}
+
+	return c.Send(fmt.Sprintf("Community-ban для чата %d:\n- статус: %s\n- log chat: %s", chatID, status, logChat))
+}
+
 // handleMessage — единый роутер для всех типов сообщений.
 // Групповые сообщения -> спам-детекция.
 func (b *Bot) handleMessage(c tele.Context) error {
@@ -407,13 +537,34 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 
 	// детекция спама: via_bot
 	isSpam := false
-	if msg.Via != nil && strings.ToLower(msg.Via.Username) == cfg.TrackedBot {
+	if msg.Sender != nil && msg.Via != nil && strings.ToLower(msg.Via.Username) == cfg.TrackedBot {
 		isSpam = true
 	}
 
 	// обновляем ring buffer (все сообщения)
-	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
-	rb.Push(isSpam, msg.Sender.ID)
+	if msg.Sender != nil {
+		rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+		rb.Push(isSpam, msg.Sender.ID)
+	}
+
+	if msg.Sender == nil {
+		return nil
+	}
+
+	if cfg.CommunityBanEnabled && isCommunityBanCandidate(msg) {
+		adminMember, adminErr := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
+		if adminErr != nil {
+			b.logger.Warn("community ban admin check failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", adminErr)
+			return nil
+		}
+		if adminMember.Role != tele.Administrator && adminMember.Role != tele.Creator {
+			b.logger.Info("spam detected",
+				"chat_id", chatID, "user_id", msg.Sender.ID,
+				"trigger", "community_ban", "message_id", msg.ID,
+				"test_mode", cfg.TestMode)
+			return b.handleCommunityBanDetection(c, msg, cfg)
+		}
+	}
 
 	if !isSpam {
 		return nil

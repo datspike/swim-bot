@@ -183,6 +183,122 @@ func TestChatConfig_NewFields_Defaults(t *testing.T) {
 	if cfg.RingBufferThreshold != 2 {
 		t.Errorf("RingBufferThreshold: ожидалось 2, получено %d", cfg.RingBufferThreshold)
 	}
+	if cfg.CommunityBanEnabled {
+		t.Error("CommunityBanEnabled: ожидалось false по умолчанию")
+	}
+	if cfg.SpamLogChatID != 0 {
+		t.Errorf("SpamLogChatID: ожидался 0, получено %d", cfg.SpamLogChatID)
+	}
+}
+
+func TestSetCommunityBanEnabled(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+
+	if err := store.SetCommunityBanEnabled(chatID, true); err != nil {
+		t.Fatalf("SetCommunityBanEnabled failed: %v", err)
+	}
+
+	cfg, err := store.GetChatConfig(chatID)
+	if err != nil {
+		t.Fatalf("GetChatConfig failed: %v", err)
+	}
+	if !cfg.CommunityBanEnabled {
+		t.Error("ожидался включённый community ban")
+	}
+	if !cfg.IsActive {
+		t.Error("ожидался активный чат после включения community ban")
+	}
+
+	if err := store.SetCommunityBanEnabled(chatID, false); err != nil {
+		t.Fatalf("SetCommunityBanEnabled disable failed: %v", err)
+	}
+	cfg, err = store.GetChatConfig(chatID)
+	if err != nil {
+		t.Fatalf("GetChatConfig failed: %v", err)
+	}
+	if cfg.CommunityBanEnabled {
+		t.Error("ожидался выключенный community ban")
+	}
+}
+
+func TestSetSpamLogChatID(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+	targetChatID := int64(-100777)
+
+	if err := store.SetSpamLogChatID(chatID, targetChatID); err != nil {
+		t.Fatalf("SetSpamLogChatID failed: %v", err)
+	}
+
+	cfg, err := store.GetChatConfig(chatID)
+	if err != nil {
+		t.Fatalf("GetChatConfig failed: %v", err)
+	}
+	if cfg.SpamLogChatID != targetChatID {
+		t.Errorf("SpamLogChatID = %d, want %d", cfg.SpamLogChatID, targetChatID)
+	}
+}
+
+func TestModerationCaseLifecycle(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+	spamMessageID := int64(500)
+	suspectUserID := int64(700)
+	logChatID := int64(-100777)
+
+	caseItem, err := store.CreateModerationCase(chatID, spamMessageID, suspectUserID, logChatID)
+	if err != nil {
+		t.Fatalf("CreateModerationCase failed: %v", err)
+	}
+	if caseItem == nil {
+		t.Fatal("ожидался созданный moderation case")
+	}
+	if caseItem.Status != CommunityBanStatusOpen {
+		t.Errorf("Status = %q, want %q", caseItem.Status, CommunityBanStatusOpen)
+	}
+
+	if err := store.SetModerationCaseMessages(caseItem.ID, 1001, 1002); err != nil {
+		t.Fatalf("SetModerationCaseMessages failed: %v", err)
+	}
+
+	stored, err := store.GetModerationCase(caseItem.ID)
+	if err != nil {
+		t.Fatalf("GetModerationCase failed: %v", err)
+	}
+	if !stored.BotReplyMessageID.Valid || stored.BotReplyMessageID.Int64 != 1001 {
+		t.Fatalf("BotReplyMessageID = %+v, want 1001", stored.BotReplyMessageID)
+	}
+	if !stored.LogReportMessageID.Valid || stored.LogReportMessageID.Int64 != 1002 {
+		t.Fatalf("LogReportMessageID = %+v, want 1002", stored.LogReportMessageID)
+	}
+
+	votes, added, err := store.AddModerationVote(caseItem.ID, 1)
+	if err != nil {
+		t.Fatalf("AddModerationVote failed: %v", err)
+	}
+	if !added || votes != 1 {
+		t.Fatalf("AddModerationVote first = (%d, %v), want (1, true)", votes, added)
+	}
+
+	votes, added, err = store.AddModerationVote(caseItem.ID, 1)
+	if err != nil {
+		t.Fatalf("AddModerationVote duplicate failed: %v", err)
+	}
+	if added || votes != 1 {
+		t.Fatalf("AddModerationVote duplicate = (%d, %v), want (1, false)", votes, added)
+	}
+
+	if err := store.MarkModerationCaseBanned(caseItem.ID); err != nil {
+		t.Fatalf("MarkModerationCaseBanned failed: %v", err)
+	}
+	stored, err = store.GetModerationCase(caseItem.ID)
+	if err != nil {
+		t.Fatalf("GetModerationCase failed: %v", err)
+	}
+	if stored.Status != CommunityBanStatusBanned {
+		t.Errorf("Status = %q, want %q", stored.Status, CommunityBanStatusBanned)
+	}
 }
 
 func TestGetStats_Empty(t *testing.T) {
