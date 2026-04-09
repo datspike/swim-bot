@@ -2,16 +2,13 @@ package bot
 
 import (
 	"fmt"
+	"html"
 	"strings"
+	"time"
 
 	"github.com/datspike/swim-bot/internal/storage"
 
 	tele "gopkg.in/telebot.v3"
-)
-
-const (
-	communityBanPromptText = "Кажется это не свободное общение"
-	communityBanThanksText = "Спасибо за свободное общение!"
 )
 
 // isCommunityBanCandidate проверяет, что сообщение — ответ с цитатой из канала.
@@ -37,8 +34,10 @@ func isCommunityBanCandidate(msg *tele.Message) bool {
 	return originChat.Type == tele.ChatChannel || originChat.Type == tele.ChatChannelPrivate
 }
 
-// handleCommunityBanDetection автоматически удаляет сообщение, банит пользователя
-// и отправляет уведомление в чат и лог-чат.
+const communityBanNoticeTTL = time.Minute
+
+// handleCommunityBanDetection автоматически удаляет сообщение, банит пользователя,
+// отправляет короткое уведомление в чат и логирует событие в лог-чат (если настроен).
 func (b *Bot) handleCommunityBanDetection(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) error {
 	chatID := c.Chat().ID
 	senderName := displayName(msg.Sender)
@@ -62,10 +61,14 @@ func (b *Bot) handleCommunityBanDetection(c tele.Context, msg *tele.Message, cfg
 		return nil
 	}
 
-	// уведомление в чат
-	banText := fmt.Sprintf("%s спам цитатой каналов, автобан, %s", senderName, communityBanThanksText)
-	if _, err := c.Bot().Send(c.Chat(), banText); err != nil {
+	// краткое уведомление в чат (автоудаляется через 1 минуту)
+	profileLink := fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, msg.Sender.ID, html.EscapeString(senderName))
+	banText := fmt.Sprintf("%s спам цитатой каналов, автобан, спасибо за свободное общение!", profileLink)
+	noticeMsg, err := c.Bot().Send(c.Chat(), banText, &tele.SendOptions{ParseMode: tele.ModeHTML})
+	if err != nil {
 		b.logger.Warn("community ban notification failed", "chat_id", chatID, "error", err)
+	} else {
+		b.scheduleCommunityBanNoticeDelete(chatID, noticeMsg.ID)
 	}
 
 	// логирование в spam-log чат
@@ -77,6 +80,20 @@ func (b *Bot) handleCommunityBanDetection(c tele.Context, msg *tele.Message, cfg
 	}
 
 	return nil
+}
+
+func (b *Bot) scheduleCommunityBanNoticeDelete(chatID int64, messageID int) {
+	time.AfterFunc(communityBanNoticeTTL, func() {
+		noticeMsg := &tele.Message{
+			ID:   messageID,
+			Chat: &tele.Chat{ID: chatID},
+		}
+		if err := withRetry(func() error {
+			return b.bot.Delete(noticeMsg)
+		}, b.logger); err != nil {
+			b.logger.Warn("community ban notification delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
+		}
+	})
 }
 
 // sendCommunityBanLog отправляет отчёт о бане в лог-чат.
