@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -35,18 +34,9 @@ type Config struct {
 
 // New создаёт и настраивает Telegram бота с webhook poller.
 func New(cfg Config) (*Bot, error) {
-	// настройка webhook
-	webhook := &tele.Webhook{
-		Listen: fmt.Sprintf(":%d", cfg.Port),
-		Endpoint: &tele.WebhookEndpoint{
-			PublicURL: cfg.WebhookURL,
-		},
-		SecretToken: cfg.WebhookSecret,
-	}
-
 	settings := tele.Settings{
 		Token:   cfg.Token,
-		Poller:  webhook,
+		Poller:  newSafeWebhook(cfg),
 		OnError: makeErrorHandler(cfg.Logger),
 	}
 

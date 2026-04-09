@@ -23,9 +23,9 @@ The workflow does not modify:
 
 ## Trigger
 
-Use `workflow_dispatch` from GitHub Actions for production releases.
+Production deploy runs automatically on `push` to `master`.
 
-This is intentionally manual for the first iteration.
+`workflow_dispatch` is also available as a manual fallback.
 
 ## Required GitHub secrets
 
@@ -54,7 +54,7 @@ Current production state already satisfies this.
 1. Add the `production` environment in GitHub.
 2. Add the required secrets.
 3. Optionally require environment approval before the job can run.
-4. Run the workflow manually on `master`.
+4. Push to `master` or run the workflow manually.
 5. Confirm `swim-bot.service` is active and review the deployment logs.
 
 ## Rollback
