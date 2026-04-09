@@ -12,6 +12,8 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
+const spamReplyAutoDeleteTTL = time.Minute
+
 // handleStart обрабатывает команду /start.
 func (b *Bot) handleStart(c tele.Context) error {
 	msg := `Привет! Я анти-спам бот.
@@ -621,6 +623,9 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 	case storage.ActionWarning:
 		if replyMsg := b.sendReply(c, msg, result.Message); replyMsg != nil {
 			replyMsgID = sql.NullInt64{Int64: int64(replyMsg.ID), Valid: true}
+			if shouldAutoDeleteSpamReply(result.Message) {
+				b.scheduleSpamReplyDelete(chatID, replyMsg.ID)
+			}
 		}
 	}
 
@@ -647,6 +652,24 @@ func (b *Bot) sendReply(c tele.Context, msg *tele.Message, text string) *tele.Me
 		return nil
 	}
 	return replyMsg
+}
+
+func shouldAutoDeleteSpamReply(text string) bool {
+	return strings.Contains(text, "Вы можете поплавать ещё")
+}
+
+func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
+	time.AfterFunc(spamReplyAutoDeleteTTL, func() {
+		replyMsg := &tele.Message{
+			ID:   messageID,
+			Chat: &tele.Chat{ID: chatID},
+		}
+		if err := withRetry(func() error {
+			return b.bot.Delete(replyMsg)
+		}, b.logger); err != nil {
+			b.logger.Warn("spam warning reply delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
+		}
+	})
 }
 
 // restrictUser ограничивает пользователя (can_send_other_messages: false) до конца суток UTC.
