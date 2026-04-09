@@ -212,3 +212,36 @@ func TestStats_WithTriggers(t *testing.T) {
 		t.Error("LastTrigger should be valid")
 	}
 }
+
+func TestShouldAutoDeleteSpamReply(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "remaining message",
+			text: "Вы можете поплавать ещё 3 раза",
+			want: true,
+		},
+		{
+			name: "test mode remaining message",
+			text: "[ТЕСТ 1/4 rb:0/2] Вы можете поплавать ещё 3 раза",
+			want: true,
+		},
+		{
+			name: "restrict message",
+			text: "Все, на сегодня наплавались",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldAutoDeleteSpamReply(tt.text)
+			if got != tt.want {
+				t.Fatalf("shouldAutoDeleteSpamReply(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
+	}
+}
