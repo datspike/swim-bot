@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,78 @@ func setupTestDB(t *testing.T) *Storage {
 	})
 
 	return store
+}
+
+func TestWithDefaultPragmas(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want []string
+	}{
+		{
+			name: "plain path",
+			dsn:  "test.db",
+			want: []string{
+				"test.db?",
+				"_pragma=busy_timeout(5000)",
+				"_pragma=foreign_keys(ON)",
+				"_pragma=journal_mode(WAL)",
+			},
+		},
+		{
+			name: "existing query",
+			dsn:  "file:test.db?cache=shared",
+			want: []string{
+				"file:test.db?cache=shared&",
+				"_pragma=busy_timeout(5000)",
+				"_pragma=foreign_keys(ON)",
+				"_pragma=journal_mode(WAL)",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := withDefaultPragmas(tt.dsn)
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("withDefaultPragmas(%q) = %q, want substring %q", tt.dsn, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestNewStorage_AppliesSQLitePragmas(t *testing.T) {
+	store, err := NewStorage(":memory:", testLogger())
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+	defer store.Close()
+
+	var journalMode string
+	if err := store.DB().QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("PRAGMA journal_mode failed: %v", err)
+	}
+	if journalMode != "memory" {
+		t.Fatalf("journal_mode = %q, want %q for :memory: DB", journalMode, "memory")
+	}
+
+	var foreignKeys int
+	if err := store.DB().QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		t.Fatalf("PRAGMA foreign_keys failed: %v", err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+
+	var busyTimeout int
+	if err := store.DB().QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout failed: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Fatalf("busy_timeout = %d, want 5000", busyTimeout)
+	}
 }
 
 func TestGetChatConfig_NotFound(t *testing.T) {

@@ -100,10 +100,7 @@ func isBusyError(err error) bool {
 // NewStorage создаёт новое подключение к SQLite с оптимальными настройками.
 // DSN должен содержать путь к файлу БД или ":memory:" для in-memory.
 func NewStorage(dsn string, logger *slog.Logger) (*Storage, error) {
-	// добавляем параметры подключения если их нет
-	if !strings.Contains(dsn, "?") {
-		dsn += "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON"
-	}
+	dsn = withDefaultPragmas(dsn)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -116,6 +113,20 @@ func NewStorage(dsn string, logger *slog.Logger) (*Storage, error) {
 	}
 
 	return &Storage{db: db, logger: logger}, nil
+}
+
+// withDefaultPragmas добавляет SQLite PRAGMA-настройки по умолчанию для modernc.org/sqlite.
+func withDefaultPragmas(dsn string) string {
+	separator := "?"
+	if strings.Contains(dsn, "?") {
+		separator = "&"
+	}
+
+	return dsn + separator + strings.Join([]string{
+		"_pragma=busy_timeout(5000)",
+		"_pragma=foreign_keys(ON)",
+		"_pragma=journal_mode(WAL)",
+	}, "&")
 }
 
 // DB возвращает внутреннее подключение к базе данных (для миграций).
