@@ -33,7 +33,7 @@
 - Runtime path on server: `/opt/swim-bot`.
 - Systemd starts `/opt/swim-bot/swim-bot` with `EnvironmentFile=/opt/swim-bot/.env`; SQLite DB currently lives at `/opt/swim-bot/swim-bot.db`.
 - Reverse proxy in repo is only reference material. Actual server state verified on 2026-04-09 uses Nginx on `datspike.xyz` over HTTPS and proxies `/swim-bot/webhook` to local port `8080`.
-- There is no deploy automation in this repo. Treat deploy as manual SSH rollout of binary/configs plus service restart unless the task explicitly introduces CI/CD.
+- Default deploy model remains binary rollout to `/opt/swim-bot` with service restart. GitHub Actions automation may exist only when explicitly introduced and should preserve the same production layout.
 
 ## Ожидания от deploy-related changes
 - Если меняешь webhook path, port, service unit or proxy behavior, sync code assumptions with `deploy/swim-bot.service` and the proxy config in `deploy`.
