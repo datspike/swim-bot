@@ -111,11 +111,13 @@ func makeErrorHandler(logger *slog.Logger) func(error, tele.Context) {
 	return func(err error, c tele.Context) {
 		var chatID int64
 		var userID int64
-		if c.Chat() != nil {
-			chatID = c.Chat().ID
-		}
-		if c.Sender() != nil {
-			userID = c.Sender().ID
+		if c != nil {
+			if c.Chat() != nil {
+				chatID = c.Chat().ID
+			}
+			if c.Sender() != nil {
+				userID = c.Sender().ID
+			}
 		}
 		logger.Error("telebot error", "error", err, "chat_id", chatID, "user_id", userID)
 	}

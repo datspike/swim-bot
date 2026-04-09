@@ -106,13 +106,13 @@ func (h *safeWebhook) waitForStop(stop chan struct{}) {
 
 func (h *safeWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.SecretToken != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != h.SecretToken {
-		h.bot.OnError(fmt.Errorf("invalid secret token in request"), nil)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
 	var update tele.Update
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		h.bot.OnError(fmt.Errorf("cannot decode update: %v", err), nil)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
