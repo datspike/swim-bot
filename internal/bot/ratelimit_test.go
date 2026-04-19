@@ -110,6 +110,26 @@ func TestDetectContext_ExcludeSelf(t *testing.T) {
 	}
 }
 
+// TestDetectContext_RBStealDisabled проверяет, что при rb_threshold <= 0 reactive-контекст отключён.
+func TestDetectContext_RBStealDisabled(t *testing.T) {
+	b, store := setupTestBot(t)
+	chatID := int64(-100001)
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_ = store.UpdateRateLimitConfig(chatID, 4, 20, 0)
+	cfg, _ := store.GetChatConfig(chatID)
+
+	// даже при наличии спама от других пользователей контекст остаётся Organic
+	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
+	rb.Push(true, 200)
+	rb.Push(true, 300)
+
+	ctx := b.detectContext(chatID, 100, cfg)
+	if ctx != storage.ContextOrganic {
+		t.Errorf("при rb_threshold=0 ожидался Organic, получено %d", ctx)
+	}
+}
+
 // TestProcessSpam_OrganicFlow проверяет полный органический флоу с restrict.
 func TestProcessSpam_OrganicFlow(t *testing.T) {
 	b, store := setupTestBot(t)
