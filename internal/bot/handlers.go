@@ -39,6 +39,7 @@ func (b *Bot) handleHelp(c tele.Context) error {
 /setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N]
 Настроить лимиты.
 Пример: /setlimits -100123456789 daily=6 rb_size=30 rb_threshold=3
+Опция: rb_steal=off — явно отключить "воровство попытки" (reactive-штраф).
 
 /getlimits <chat_id>
 Показать текущие настройки лимитов.
@@ -51,6 +52,7 @@ func (b *Bot) handleHelp(c tele.Context) error {
 /resetcounters <chat_id>
 Сбросить все спам-счётчики за сегодня (только в тестовом режиме).
 Пример: /resetcounters -100123456789
+Опция: force=on — разрешить сброс вне тестового режима и отправить уведомление в target-чат.
 
 /stats <chat_id>
 Показать статистику срабатываний.
@@ -199,12 +201,12 @@ func (b *Bot) handleStats(c tele.Context) error {
 	return c.Send(msg)
 }
 
-// handleSetLimits обрабатывает команду /setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N].
+// handleSetLimits обрабатывает команду /setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N] [rb_steal=on|off].
 // Настраивает параметры rate limiting для чата.
 func (b *Bot) handleSetLimits(c tele.Context) error {
 	args := c.Args()
 	if len(args) < 2 {
-		return c.Send("Формат: /setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N]")
+		return c.Send("Формат: /setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N] [rb_steal=on|off]")
 	}
 
 	chatID, err := strconv.ParseInt(args[0], 10, 64)
@@ -233,24 +235,47 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 	daily := cfg.DailyLimit
 	rbSize := cfg.RingBufferSize
 	rbThreshold := cfg.RingBufferThreshold
+	rbStealExplicit := false
 
 	for _, arg := range args[1:] {
 		parts := strings.SplitN(arg, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		val, parseErr := strconv.Atoi(parts[1])
-		if parseErr != nil {
-			return c.Send(fmt.Sprintf("Неверное значение: %s", arg))
-		}
 
 		switch parts[0] {
 		case "daily":
+			val, parseErr := strconv.Atoi(parts[1])
+			if parseErr != nil {
+				return c.Send(fmt.Sprintf("Неверное значение: %s", arg))
+			}
 			daily = val
 		case "rb_size":
+			val, parseErr := strconv.Atoi(parts[1])
+			if parseErr != nil {
+				return c.Send(fmt.Sprintf("Неверное значение: %s", arg))
+			}
 			rbSize = val
 		case "rb_threshold":
+			val, parseErr := strconv.Atoi(parts[1])
+			if parseErr != nil {
+				return c.Send(fmt.Sprintf("Неверное значение: %s", arg))
+			}
 			rbThreshold = val
+		case "rb_steal":
+			mode := strings.ToLower(parts[1])
+			switch mode {
+			case "off":
+				rbThreshold = 0
+				rbStealExplicit = true
+			case "on":
+				if rbThreshold <= 0 {
+					rbThreshold = 2
+				}
+				rbStealExplicit = true
+			default:
+				return c.Send("Неверное значение rb_steal. Используй on или off.")
+			}
 		}
 	}
 
@@ -262,8 +287,16 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 
 	b.logger.Info("rate limits updated", "chat_id", chatID, "daily", daily, "rb_size", rbSize, "rb_threshold", rbThreshold, "by_user", c.Sender().ID)
 
-	return c.Send(fmt.Sprintf("Лимиты обновлены: daily=%d, rb_size=%d, rb_threshold=%d",
-		daily, rbSize, rbThreshold))
+	status := "on"
+	if rbThreshold <= 0 {
+		status = "off"
+	}
+	if rbStealExplicit {
+		return c.Send(fmt.Sprintf("Лимиты обновлены: daily=%d, rb_size=%d, rb_threshold=%d, rb_steal=%s",
+			daily, rbSize, rbThreshold, status))
+	}
+	return c.Send(fmt.Sprintf("Лимиты обновлены: daily=%d, rb_size=%d, rb_threshold=%d (rb_steal=%s)",
+		daily, rbSize, rbThreshold, status))
 }
 
 // handleGetLimits обрабатывает команду /getlimits <chat_id>.
@@ -298,7 +331,8 @@ func (b *Bot) handleGetLimits(c tele.Context) error {
 	return c.Send(fmt.Sprintf(`Лимиты для чата %d:
 - daily_limit: %d
 - ring_buffer_size: %d
-- ring_buffer_threshold: %d`, chatID, cfg.DailyLimit, cfg.RingBufferSize, cfg.RingBufferThreshold))
+- ring_buffer_threshold: %d
+- rb_steal: %s`, chatID, cfg.DailyLimit, cfg.RingBufferSize, cfg.RingBufferThreshold, rbStealStatus(cfg.RingBufferThreshold)))
 }
 
 // handleTestMode обрабатывает команду /testmode <chat_id> on|off.
@@ -348,12 +382,20 @@ func (b *Bot) handleTestMode(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Тестовый режим выключен для чата %d", chatID))
 }
 
-// handleResetCounters обрабатывает команду /resetcounters <chat_id>.
-// Сбрасывает все спам-счётчики за сегодня. Работает только в тестовом режиме.
+func rbStealStatus(rbThreshold int) string {
+	if rbThreshold <= 0 {
+		return "off"
+	}
+	return "on"
+}
+
+// handleResetCounters обрабатывает команду /resetcounters <chat_id> [force=on].
+// Сбрасывает все спам-счётчики за сегодня. По умолчанию только в тестовом режиме.
+// При force=on можно сбрасывать всегда.
 func (b *Bot) handleResetCounters(c tele.Context) error {
 	args := c.Args()
 	if len(args) < 1 {
-		return c.Send("Формат: /resetcounters <chat_id>")
+		return c.Send("Формат: /resetcounters <chat_id> [force=on]")
 	}
 
 	chatID, err := strconv.ParseInt(args[0], 10, 64)
@@ -371,12 +413,26 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
 	}
 
+	forceReset := false
+	for _, arg := range args[1:] {
+		parts := strings.SplitN(arg, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if parts[0] == "force" {
+			forceReset = strings.EqualFold(parts[1], "on")
+		}
+	}
+
 	// проверяем что чат в тестовом режиме
 	cfg, err := b.storage.GetChatConfig(chatID)
 	if err != nil {
 		return c.Send("Чат не настроен.")
 	}
-	if !cfg.TestMode {
+	if cfg == nil {
+		return c.Send("Чат не настроен.")
+	}
+	if !cfg.TestMode && !forceReset {
 		return c.Send("Сброс счётчиков доступен только в тестовом режиме.")
 	}
 
@@ -386,7 +442,12 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		return c.Send("Не удалось сбросить счётчики.")
 	}
 
-	b.logger.Info("counters reset", "chat_id", chatID, "affected", affected, "by_user", c.Sender().ID)
+	notifyText := "Ого, повезло, счетчики плавания на сегодня сброшены"
+	if _, sendErr := c.Bot().Send(&tele.Chat{ID: chatID}, notifyText); sendErr != nil {
+		b.logger.Warn("reset counters notify failed", "chat_id", chatID, "error", sendErr)
+	}
+
+	b.logger.Info("counters reset", "chat_id", chatID, "affected", affected, "by_user", c.Sender().ID, "force", forceReset)
 	return c.Send(fmt.Sprintf("Сброшено %d счётчиков для чата %d", affected, chatID))
 }
 

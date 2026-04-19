@@ -18,6 +18,10 @@ type spamResult struct {
 // detectContext определяет контекст спам-сообщения по ring buffer.
 // Reactive если N+ спам-записей от других пользователей в окне, иначе Organic.
 func (b *Bot) detectContext(chatID, userID int64, cfg *storage.ChatConfig) storage.MessageContext {
+	if cfg.RingBufferThreshold <= 0 {
+		return storage.ContextOrganic
+	}
+
 	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
 	spamCount := rb.SpamCountByOthers(userID)
 	if spamCount >= cfg.RingBufferThreshold {
