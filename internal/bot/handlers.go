@@ -30,60 +30,72 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 // handleHelp обрабатывает команду /help.
 func (b *Bot) handleHelp(c tele.Context) error {
-	msg := `Команды:
+	msg := `Полная справка по командам swim-bot
 
+Базовые:
+/start — краткое приветствие и быстрый старт.
+/help — эта подробная справка.
+
+Настройка детекции:
 /setbot <chat_id> @username
-Указать, какого inline-бота отслеживать в чате.
-Пример: /setbot -100123456789 @mlversebot
+  Назначает inline-бота, через которого считаем сообщения спамом (via_bot).
+  Пример: /setbot -100123456789 @mlversebot
 
-/setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N]
-Настроить лимиты.
-Пример: /setlimits -100123456789 daily=6 rb_size=30 rb_threshold=3
-Опция: rb_steal=off — явно отключить "воровство попытки" (reactive-штраф).
+/setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N] [rb_steal=on|off]
+  Настраивает лимиты:
+  - daily: суточный лимит срабатываний до restrict,
+  - rb_size: размер скользящего окна сообщений,
+  - rb_threshold: порог спам-событий в окне для reactive-контекста,
+  - rb_steal=off: отключает reactive-штраф ("воровство попытки").
+  Пример: /setlimits -100123456789 daily=6 rb_size=30 rb_threshold=3 rb_steal=on
 
 /getlimits <chat_id>
-Показать текущие настройки лимитов.
-Пример: /getlimits -100123456789
-
-/testmode <chat_id> on|off
-Включить/выключить тестовый режим (отладочный вывод [ТЕСТ M/N rb:X/Y], админы защищены от restrict).
-Пример: /testmode -100123456789 on
-
-/resetcounters <chat_id>
-Сбросить все спам-счётчики за сегодня (только в тестовом режиме).
-Пример: /resetcounters -100123456789
-Опция: force=on — разрешить сброс вне тестового режима и отправить уведомление в target-чат.
-
-/stats <chat_id>
-Показать статистику срабатываний.
-Пример: /stats -100123456789
-
-/setcommunityban <chat_id> on|off
-Включить/выключить community-ban для цитатного спама.
-Пример: /setcommunityban -100123456789 on
-
-/setspamlog <chat_id> <target_chat_id>
-Настроить чат для логов и копий community-ban кейсов.
-Пример: /setspamlog -100123456789 -100987654321
-
-/communitybanstatus <chat_id>
-Показать состояние community-ban и log chat.
-Пример: /communitybanstatus -100123456789
+  Показывает текущие лимиты и связанные настройки.
+  Пример: /getlimits -100123456789
 
 /setspamdelete <chat_id> <seconds>
-Настроить автоудаление спам-сообщений via tracked bot (0 = выключено).
-Пример: /setspamdelete -100123456789 60
+  TTL автоудаления спам-сообщений (через tracked bot) в секундах.
+  0 = выключено.
+  Пример: /setspamdelete -100123456789 60
 
-Как узнать chat_id:
-1. Добавь @raw_data_bot в чат
-2. Отправь любое сообщение
-3. Бот покажет chat_id
+Режимы и обслуживание:
+/testmode <chat_id> on|off
+  Включает/выключает тестовый режим:
+  - добавляет в ответы отладочный префикс [ТЕСТ M/N rb:X/Y],
+  - защищает админов от тестового restrict.
+  Пример: /testmode -100123456789 on
 
-Как это работает:
-1. Добавь меня в чат как администратора
-2. Настрой /setbot
-3. Пользователь спамит -> предупреждения -> restrict до конца дня
-4. Для цитатного спама можно включить community-ban с голосованием участников`
+/resetcounters <chat_id> [force=on]
+  Сбрасывает дневные spam-счётчики в чате.
+  По умолчанию доступно только в test mode.
+  force=on — разрешает сброс вне test mode и отправляет уведомление в чат.
+  Пример: /resetcounters -100123456789 force=on
+
+/stats <chat_id>
+  Статистика срабатываний: количество, последний триггер, статус активации.
+  Пример: /stats -100123456789
+
+Community-ban (цитатный спам):
+/setcommunityban <chat_id> on|off
+  Включает/выключает community-ban для подозрительных цитат из каналов.
+  Пример: /setcommunityban -100123456789 on
+
+/setspamlog <chat_id> <target_chat_id>
+  Назначает чат для логов и копий community-ban кейсов.
+  Пример: /setspamlog -100123456789 -100987654321
+
+/communitybanstatus <chat_id>
+  Показывает статус community-ban и текущий log-chat.
+  Пример: /communitybanstatus -100123456789
+
+Как получить chat_id:
+1) Добавь @raw_data_bot в нужный чат.
+2) Отправь любое сообщение.
+3) Возьми числовой chat_id из ответа.
+
+Важно:
+- Все команды настройки выполняются в ЛС с этим ботом.
+- Для указанного <chat_id> ты должен быть администратором/владельцем.`
 
 	return c.Send(msg)
 }
