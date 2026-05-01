@@ -76,7 +76,7 @@ func TestBuildOrganicSpamResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			counter := &storage.SpamCounter{Count: tt.count, EffectiveLimit: tt.limit}
-			got := buildOrganicSpamResult(counter, 2, 3)
+			got := buildOrganicSpamResult(counter, storage.ContextOrganic, 2, 3)
 
 			if got.Action != tt.wantAction {
 				t.Fatalf("Action = %d, want %d", got.Action, tt.wantAction)
@@ -124,7 +124,7 @@ func TestBuildReactiveSpamResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			counter := &storage.SpamCounter{Count: tt.count, EffectiveLimit: tt.limit}
-			got := buildReactiveSpamResult(counter, 2, 3)
+			got := buildReactiveSpamResult(counter, storage.ContextReactive, 2, 3)
 
 			if got.Action != tt.wantAction {
 				t.Fatalf("Action = %d, want %d", got.Action, tt.wantAction)
@@ -243,6 +243,9 @@ func TestProcessSpam_OrganicFlow(t *testing.T) {
 	if result.Remaining != 3 {
 		t.Errorf("Remaining = %d, want 3", result.Remaining)
 	}
+	if result.Context != storage.ContextOrganic {
+		t.Errorf("Context = %d, want Organic", result.Context)
+	}
 
 	// 4-й спам: restrict (вместо кика)
 	for i := 2; i <= 3; i++ {
@@ -284,6 +287,9 @@ func TestProcessSpam_ReactiveSteal(t *testing.T) {
 	}
 	if result.Message != "Группами плавать нежелательно, ворую попытку, осталось: 2" {
 		t.Errorf("Message = %q", result.Message)
+	}
+	if result.Context != storage.ContextReactive {
+		t.Errorf("Context = %d, want Reactive", result.Context)
 	}
 }
 
@@ -331,6 +337,9 @@ func TestProcessSpam_AlreadyKicked(t *testing.T) {
 	result, _ := b.processSpam(chatID, userID, cfg)
 	if !result.AlreadyRestricted {
 		t.Error("ожидался признак уже ограниченного пользователя")
+	}
+	if result.Context != storage.ContextOrganic {
+		t.Errorf("Context = %d, want Organic", result.Context)
 	}
 	if result.Action != 0 {
 		t.Errorf("Action = %d, want 0", result.Action)

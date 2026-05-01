@@ -36,6 +36,17 @@ func isCommunityBanCandidate(msg *tele.Message) bool {
 
 const communityBanNoticeTTL = time.Minute
 
+// shouldCommunityBan проверяет, нужно ли применять автобан цитатного спама.
+func shouldCommunityBan(msg *tele.Message, cfg *storage.ChatConfig, role tele.MemberStatus) bool {
+	if cfg == nil || !cfg.CommunityBanEnabled {
+		return false
+	}
+	if !isCommunityBanCandidate(msg) {
+		return false
+	}
+	return !isChatAdmin(role)
+}
+
 // handleCommunityBanDetection автоматически удаляет сообщение, банит пользователя,
 // отправляет короткое уведомление в чат и логирует событие в лог-чат (если настроен).
 func (b *Bot) handleCommunityBanDetection(c tele.Context, msg *tele.Message, cfg *storage.ChatConfig) error {

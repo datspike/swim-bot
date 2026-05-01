@@ -3,8 +3,9 @@ package storage
 import (
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
+
+	"github.com/datspike/swim-bot/internal/chatconfig"
 )
 
 // BotDeleteRule хранит правило автоудаления сообщений от bot-аккаунта.
@@ -18,13 +19,7 @@ type BotDeleteRule struct {
 
 // NormalizeBotUsername нормализует username bot-аккаунта для правил автоудаления.
 func NormalizeBotUsername(username string) (string, error) {
-	username = strings.TrimSpace(username)
-	username = strings.TrimPrefix(username, "@")
-	username = strings.ToLower(username)
-	if username == "" {
-		return "", errors.New("username bot-аккаунта не должен быть пустым")
-	}
-	return username, nil
+	return chatconfig.NormalizeBotUsername(username)
 }
 
 // SetBotDeleteRule создаёт или обновляет правило автоудаления сообщений от bot-аккаунта.

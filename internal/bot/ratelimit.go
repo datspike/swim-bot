@@ -7,6 +7,7 @@ import (
 // spamResult содержит результат обработки спам-сообщения.
 type spamResult struct {
 	Action            storage.SpamAction
+	Context           storage.MessageContext
 	Remaining         int    // оставшиеся попытки
 	Count             int    // текущий счётчик (сколько раз сработало)
 	Limit             int    // лимит попыток
@@ -40,16 +41,23 @@ func (b *Bot) processSpam(chatID, userID int64, cfg *storage.ChatConfig) (*spamR
 		return nil, err
 	}
 
-	// уже ограничен ранее — пропускаем повторный restrict
-	if counter.Kicked {
-		return &spamResult{Count: counter.Count, Limit: counter.EffectiveLimit, AlreadyRestricted: true}, nil
-	}
-
 	// определяем контекст + получаем rb stats
 	ctx := b.detectContext(chatID, userID, cfg)
 	rb := b.ringBuffers.GetOrCreate(chatID, cfg.RingBufferSize)
 	rbSpamCount := rb.SpamCountByOthers(userID)
 	rbThreshold := cfg.RingBufferThreshold
+
+	// уже ограничен ранее — пропускаем повторный restrict
+	if counter.Kicked {
+		return &spamResult{
+			Context:           ctx,
+			Count:             counter.Count,
+			Limit:             counter.EffectiveLimit,
+			RBSpamCount:       rbSpamCount,
+			RBThreshold:       rbThreshold,
+			AlreadyRestricted: true,
+		}, nil
+	}
 
 	// consume 1 попытку
 	counter, err = b.storage.IncrementSpamCounter(chatID, userID)
@@ -66,18 +74,19 @@ func (b *Bot) processSpam(chatID, userID int64, cfg *storage.ChatConfig) (*spamR
 		if err != nil {
 			return nil, err
 		}
-		return buildReactiveSpamResult(counter, rbSpamCount, rbThreshold), nil
+		return buildReactiveSpamResult(counter, ctx, rbSpamCount, rbThreshold), nil
 	}
 
-	return buildOrganicSpamResult(counter, rbSpamCount, rbThreshold), nil
+	return buildOrganicSpamResult(counter, ctx, rbSpamCount, rbThreshold), nil
 }
 
 // buildOrganicSpamResult формирует результат обычного расхода попытки.
-func buildOrganicSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThreshold int) *spamResult {
+func buildOrganicSpamResult(counter *storage.SpamCounter, ctx storage.MessageContext, rbSpamCount, rbThreshold int) *spamResult {
 	remaining := counter.EffectiveLimit - counter.Count
 	if remaining <= 0 {
 		return newSpamResult(
 			storage.ActionRestrict,
+			ctx,
 			0,
 			counter,
 			rbSpamCount,
@@ -88,6 +97,7 @@ func buildOrganicSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThresho
 
 	return newSpamResult(
 		storage.ActionWarning,
+		ctx,
 		remaining,
 		counter,
 		rbSpamCount,
@@ -97,11 +107,12 @@ func buildOrganicSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThresho
 }
 
 // buildReactiveSpamResult формирует результат расхода попытки с reactive-штрафом.
-func buildReactiveSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThreshold int) *spamResult {
+func buildReactiveSpamResult(counter *storage.SpamCounter, ctx storage.MessageContext, rbSpamCount, rbThreshold int) *spamResult {
 	remaining := counter.EffectiveLimit - counter.Count
 	if remaining <= 0 {
 		return newSpamResult(
 			storage.ActionRestrict,
+			ctx,
 			0,
 			counter,
 			rbSpamCount,
@@ -112,6 +123,7 @@ func buildReactiveSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThresh
 
 	return newSpamResult(
 		storage.ActionWarning,
+		ctx,
 		remaining,
 		counter,
 		rbSpamCount,
@@ -121,9 +133,10 @@ func buildReactiveSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThresh
 }
 
 // newSpamResult собирает общий результат обработки спама.
-func newSpamResult(action storage.SpamAction, remaining int, counter *storage.SpamCounter, rbSpamCount, rbThreshold int, message string) *spamResult {
+func newSpamResult(action storage.SpamAction, ctx storage.MessageContext, remaining int, counter *storage.SpamCounter, rbSpamCount, rbThreshold int, message string) *spamResult {
 	return &spamResult{
 		Action:      action,
+		Context:     ctx,
 		Remaining:   remaining,
 		Count:       counter.Count,
 		Limit:       counter.EffectiveLimit,

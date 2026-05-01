@@ -8,24 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/datspike/swim-bot/internal/chatconfig"
+
 	_ "modernc.org/sqlite" // драйвер SQLite
 )
 
 // ChatConfig содержит конфигурацию бота для конкретного чата.
-type ChatConfig struct {
-	ChatID              int64
-	TrackedBot          string
-	IsActive            bool
-	DailyLimit          int
-	TestMode            bool // тестовый режим: отладочный вывод [ТЕСТ M/N rb:X/Y] + protect admins
-	RingBufferSize      int  // M — размер скользящего окна сообщений
-	RingBufferThreshold int  // N — порог спам-событий для reactive контекста
-	CommunityBanEnabled bool
-	SpamLogChatID       int64
-	SpamDeleteTTLSec    int
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
+type ChatConfig = chatconfig.Config
 
 // MessageContext определяет контекст спам-сообщения.
 type MessageContext int
@@ -179,8 +168,7 @@ func (s *Storage) GetChatConfig(chatID int64) (*ChatConfig, error) {
 // UpsertTrackedBot создаёт или обновляет tracked_bot для чата.
 // Возвращает true если это новая запись.
 func (s *Storage) UpsertTrackedBot(chatID int64, trackedBot string) (bool, error) {
-	// нормализация: убираем @ и приводим к lowercase
-	trackedBot = strings.TrimPrefix(strings.ToLower(trackedBot), "@")
+	trackedBot = chatconfig.NormalizeTrackedBot(trackedBot)
 
 	result, err := s.db.Exec(`
 		INSERT INTO chat_config (chat_id, tracked_bot, is_active, updated_at)
