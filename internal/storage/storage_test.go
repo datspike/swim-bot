@@ -74,6 +74,29 @@ func TestWithDefaultPragmas(t *testing.T) {
 	}
 }
 
+func TestMigrateRejectsFutureSchemaVersion(t *testing.T) {
+	store, err := NewStorage(":memory:", testLogger())
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+	t.Cleanup(func() {
+		store.Close()
+	})
+
+	_, err = store.DB().Exec("PRAGMA user_version = 999")
+	if err != nil {
+		t.Fatalf("set user_version failed: %v", err)
+	}
+
+	err = Migrate(store.DB(), testLogger())
+	if err == nil {
+		t.Fatal("ожидалась ошибка для будущей версии схемы")
+	}
+	if !strings.Contains(err.Error(), "новее поддерживаемой") {
+		t.Fatalf("Migrate error = %v, want future version message", err)
+	}
+}
+
 func TestNewStorage_AppliesSQLitePragmas(t *testing.T) {
 	store, err := NewStorage(":memory:", testLogger())
 	if err != nil {
@@ -283,7 +306,8 @@ func TestSetCommunityBanEnabled(t *testing.T) {
 		t.Error("ожидался активный чат после включения community ban")
 	}
 
-	if err := store.SetCommunityBanEnabled(chatID, false); err != nil {
+	err = store.SetCommunityBanEnabled(chatID, false)
+	if err != nil {
 		t.Fatalf("SetCommunityBanEnabled disable failed: %v", err)
 	}
 	cfg, err = store.GetChatConfig(chatID)
@@ -331,7 +355,8 @@ func TestModerationCaseLifecycle(t *testing.T) {
 		t.Errorf("Status = %q, want %q", caseItem.Status, CommunityBanStatusOpen)
 	}
 
-	if err := store.SetModerationCaseMessages(caseItem.ID, 1001, 1002); err != nil {
+	err = store.SetModerationCaseMessages(caseItem.ID, 1001, 1002)
+	if err != nil {
 		t.Fatalf("SetModerationCaseMessages failed: %v", err)
 	}
 
@@ -362,7 +387,8 @@ func TestModerationCaseLifecycle(t *testing.T) {
 		t.Fatalf("AddModerationVote duplicate = (%d, %v), want (1, false)", votes, added)
 	}
 
-	if err := store.MarkModerationCaseBanned(caseItem.ID); err != nil {
+	err = store.MarkModerationCaseBanned(caseItem.ID)
+	if err != nil {
 		t.Fatalf("MarkModerationCaseBanned failed: %v", err)
 	}
 	stored, err = store.GetModerationCase(caseItem.ID)
@@ -466,7 +492,7 @@ func TestWithSQLiteRetry_Success(t *testing.T) {
 	err := withSQLiteRetry(func() error {
 		calls++
 		return nil
-	}, 3)
+	})
 	if err != nil {
 		t.Errorf("ожидалось nil, получено %v", err)
 	}
@@ -480,7 +506,7 @@ func TestWithSQLiteRetry_NonBusyError(t *testing.T) {
 	err := withSQLiteRetry(func() error {
 		calls++
 		return errors.New("some other error")
-	}, 3)
+	})
 	if err == nil {
 		t.Error("ожидалась ошибка")
 	}

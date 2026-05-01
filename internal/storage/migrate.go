@@ -32,6 +32,10 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 		"migrations/005_spam_delete_ttl.sql",
 	}
 
+	if currentVersion > len(migrations) {
+		return fmt.Errorf("версия схемы %d новее поддерживаемой %d", currentVersion, len(migrations))
+	}
+
 	// применяем миграции по порядку
 	for i := currentVersion; i < len(migrations); i++ {
 		migrationFile := migrations[i]

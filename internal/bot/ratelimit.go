@@ -6,13 +6,14 @@ import (
 
 // spamResult содержит результат обработки спам-сообщения.
 type spamResult struct {
-	Action      storage.SpamAction
-	Remaining   int    // оставшиеся попытки
-	Count       int    // текущий счётчик (сколько раз сработало)
-	Limit       int    // лимит попыток
-	RBSpamCount int    // спам-записей от других в ring buffer
-	RBThreshold int    // порог для reactive
-	Message     string // текстовое сообщение для чата
+	Action            storage.SpamAction
+	Remaining         int    // оставшиеся попытки
+	Count             int    // текущий счётчик (сколько раз сработало)
+	Limit             int    // лимит попыток
+	RBSpamCount       int    // спам-записей от других в ring buffer
+	RBThreshold       int    // порог для reactive
+	Message           string // текстовое сообщение для чата
+	AlreadyRestricted bool   // пользователь уже ограничен за текущие сутки
 }
 
 // detectContext определяет контекст спам-сообщения по ring buffer.
@@ -39,9 +40,9 @@ func (b *Bot) processSpam(chatID, userID int64, cfg *storage.ChatConfig) (*spamR
 		return nil, err
 	}
 
-	// уже ограничен ранее — пропускаем (не нужен повторный restrict)
+	// уже ограничен ранее — пропускаем повторный restrict
 	if counter.Kicked {
-		return &spamResult{Action: storage.ActionRestrict, Count: counter.Count, Limit: counter.EffectiveLimit}, nil
+		return &spamResult{Count: counter.Count, Limit: counter.EffectiveLimit, AlreadyRestricted: true}, nil
 	}
 
 	// определяем контекст + получаем rb stats

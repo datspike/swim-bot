@@ -72,6 +72,7 @@ func TestRingBuffer_CircularOverflow(t *testing.T) {
 }
 
 func TestRingBuffer_ConcurrentAccess(t *testing.T) {
+	t.Log("проверка конкурентного доступа")
 	rb := NewRingBuffer(100)
 	var wg sync.WaitGroup
 

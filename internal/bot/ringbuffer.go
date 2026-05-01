@@ -59,9 +59,15 @@ type ChatRingBuffers struct {
 // GetOrCreate возвращает ring buffer для чата, создавая при необходимости.
 func (c *ChatRingBuffers) GetOrCreate(chatID int64, size int) *RingBuffer {
 	if val, ok := c.buffers.Load(chatID); ok {
-		return val.(*RingBuffer)
+		if buf, ok := val.(*RingBuffer); ok {
+			return buf
+		}
 	}
 	buf := NewRingBuffer(size)
 	actual, _ := c.buffers.LoadOrStore(chatID, buf)
-	return actual.(*RingBuffer)
+	if stored, ok := actual.(*RingBuffer); ok {
+		return stored
+	}
+	c.buffers.Store(chatID, buf)
+	return buf
 }

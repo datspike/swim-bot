@@ -2,6 +2,7 @@ package bot
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -295,6 +296,10 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 		}
 	}
 
+	if validationErr := validateRateLimitConfig(daily, rbSize, rbThreshold); validationErr != nil {
+		return c.Send(validationErr.Error())
+	}
+
 	err = b.storage.UpdateRateLimitConfig(chatID, daily, rbSize, rbThreshold)
 	if err != nil {
 		b.logger.Error("update rate limit config failed", "chat_id", chatID, "error", err)
@@ -403,6 +408,19 @@ func rbStealStatus(rbThreshold int) string {
 		return "off"
 	}
 	return "on"
+}
+
+func validateRateLimitConfig(daily, rbSize, rbThreshold int) error {
+	if daily < 1 {
+		return errors.New("daily должен быть не меньше 1")
+	}
+	if rbSize < 1 {
+		return errors.New("rb_size должен быть не меньше 1")
+	}
+	if rbThreshold < 0 {
+		return errors.New("rb_threshold должен быть не меньше 0")
+	}
+	return nil
 }
 
 // handleResetCounters обрабатывает команду /resetcounters <chat_id> [force=on].
@@ -651,10 +669,7 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 	}
 
 	// детекция спама: via_bot
-	isSpam := false
-	if msg.Sender != nil && msg.Via != nil && strings.ToLower(msg.Via.Username) == cfg.TrackedBot {
-		isSpam = true
-	}
+	isSpam := msg.Sender != nil && msg.Via != nil && strings.EqualFold(msg.Via.Username, cfg.TrackedBot)
 
 	// обновляем ring buffer (все сообщения)
 	if msg.Sender != nil {
@@ -719,12 +734,22 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 			result.Count, result.Limit, result.RBSpamCount, result.RBThreshold, result.Message)
 	}
 
+	if result.AlreadyRestricted {
+		ttl := time.Duration(cfg.SpamDeleteTTLSec) * time.Second
+		if ttl > 0 {
+			b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
+		}
+		return nil
+	}
+
 	var replyMsgID sql.NullInt64
 
 	switch result.Action {
 	case storage.ActionRestrict:
 		b.restrictUser(c, msg, cfg)
-		_ = b.storage.MarkKicked(chatID, msg.Sender.ID)
+		if err := b.storage.MarkKicked(chatID, msg.Sender.ID); err != nil {
+			b.logger.Error("mark kicked failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
+		}
 
 		// отправляем текст предупреждения если есть
 		if result.Message != "" {

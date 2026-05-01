@@ -3,9 +3,11 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	tele "gopkg.in/telebot.v3"
 )
@@ -13,6 +15,8 @@ import (
 // safeWebhook повторяет контракт tele.Webhook, но не закрывает stop-канал повторно.
 // В telebot v3.3.8 стандартный Webhook закрывает stop внутри waitForStop,
 // а Bot.Stop() закрывает тот же канал снаружи, что приводит к panic при shutdown.
+const webhookReadHeaderTimeout = 5 * time.Second
+
 type safeWebhook struct {
 	Listen         string
 	MaxConnections int
@@ -44,8 +48,10 @@ func (h *safeWebhook) getParams() map[string]string {
 		params["max_connections"] = strconv.Itoa(h.MaxConnections)
 	}
 	if len(h.AllowedUpdates) > 0 {
-		data, _ := json.Marshal(h.AllowedUpdates)
-		params["allowed_updates"] = string(data)
+		data, err := json.Marshal(h.AllowedUpdates)
+		if err == nil {
+			params["allowed_updates"] = string(data)
+		}
 	}
 	if h.IP != "" {
 		params["ip_address"] = h.IP
@@ -84,19 +90,26 @@ func (h *safeWebhook) Poll(b *tele.Bot, dest chan tele.Update, stop chan struct{
 	}
 
 	s := &http.Server{
-		Addr:    h.Listen,
-		Handler: h,
+		Addr:              h.Listen,
+		Handler:           h,
+		ReadHeaderTimeout: webhookReadHeaderTimeout,
 	}
 
 	go func() {
 		h.waitForStop(stop)
-		_ = s.Shutdown(context.Background())
+		if err := s.Shutdown(context.Background()); err != nil {
+			b.OnError(err, nil)
+		}
 	}()
 
+	var err error
 	if h.TLS != nil {
-		_ = s.ListenAndServeTLS(h.TLS.Cert, h.TLS.Key)
+		err = s.ListenAndServeTLS(h.TLS.Cert, h.TLS.Key)
 	} else {
-		_ = s.ListenAndServe()
+		err = s.ListenAndServe()
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		b.OnError(err, nil)
 	}
 }
 

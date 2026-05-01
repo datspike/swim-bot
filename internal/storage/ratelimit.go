@@ -40,7 +40,7 @@ func (s *Storage) IncrementSpamCounter(chatID, userID int64) (*SpamCounter, erro
 			WHERE chat_id = ? AND user_id = ? AND date = date('now')
 		`, chatID, userID)
 		return e
-	}, 3)
+	})
 	if err != nil {
 		return nil, errors.Join(errors.New("не удалось увеличить spam_counter"), err)
 	}
@@ -69,7 +69,7 @@ func (s *Storage) MarkKicked(chatID, userID int64) error {
 			WHERE chat_id = ? AND user_id = ? AND date = date('now')
 		`, chatID, userID)
 		return e
-	}, 3)
+	})
 	if err != nil {
 		return errors.Join(errors.New("не удалось пометить kicked"), err)
 	}
@@ -104,7 +104,10 @@ func (s *Storage) ResetSpamCounters(chatID int64) (int64, error) {
 	if err != nil {
 		return 0, errors.Join(errors.New("не удалось сбросить счётчики"), err)
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.Join(errors.New("не удалось получить число сброшенных счётчиков"), err)
+	}
 	return affected, nil
 }
 

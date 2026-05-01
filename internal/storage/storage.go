@@ -77,10 +77,12 @@ type Storage struct {
 	logger *slog.Logger
 }
 
+const sqliteBusyMaxRetries = 3
+
 // withSQLiteRetry выполняет fn с повторами при SQLITE_BUSY (FR-013).
-// Максимум maxRetries повторов с экспоненциальным backoff.
-func withSQLiteRetry(fn func() error, maxRetries int) error {
-	for i := 0; i < maxRetries; i++ {
+// Использует экспоненциальный backoff между попытками.
+func withSQLiteRetry(fn func() error) error {
+	for i := 0; i < sqliteBusyMaxRetries; i++ {
 		err := fn()
 		if err == nil {
 			return nil

@@ -75,6 +75,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, errors.New("MAX_MESSAGE_AGE_SEC должен быть числом")
 		}
+		if age < 1 {
+			return nil, errors.New("MAX_MESSAGE_AGE_SEC должен быть не меньше 1")
+		}
 		cfg.MaxMessageAgeSec = age
 	}
 

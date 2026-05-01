@@ -129,7 +129,7 @@ func (s *Storage) GetModerationCase(caseID int64) (*ModerationCase, error) {
 }
 
 // SetModerationCaseMessages сохраняет сообщения бота, созданные для кейса.
-func (s *Storage) SetModerationCaseMessages(caseID int64, botReplyMessageID int, logReportMessageID int) error {
+func (s *Storage) SetModerationCaseMessages(caseID int64, botReplyMessageID, logReportMessageID int) error {
 	_, err := s.db.Exec(`
 		UPDATE moderation_case
 		SET bot_reply_message_id = ?,
@@ -144,7 +144,7 @@ func (s *Storage) SetModerationCaseMessages(caseID int64, botReplyMessageID int,
 }
 
 // AddModerationVote регистрирует голос и возвращает новый счётчик голосов.
-func (s *Storage) AddModerationVote(caseID, voterUserID int64) (int, bool, error) {
+func (s *Storage) AddModerationVote(caseID, voterUserID int64) (votes int, added bool, err error) {
 	result, err := s.db.Exec(`
 		INSERT OR IGNORE INTO moderation_vote (case_id, voter_user_id)
 		VALUES (?, ?)
@@ -153,8 +153,11 @@ func (s *Storage) AddModerationVote(caseID, voterUserID int64) (int, bool, error
 		return 0, false, errors.Join(errors.New("не удалось сохранить голос"), err)
 	}
 
-	rowsAffected, _ := result.RowsAffected() //nolint:errcheck,gosec // SQLite драйвер всегда возвращает nil
-	votes, err := s.GetModerationVoteCount(caseID)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, false, errors.Join(errors.New("не удалось получить число добавленных голосов"), err)
+	}
+	votes, err = s.GetModerationVoteCount(caseID)
 	if err != nil {
 		return 0, false, err
 	}

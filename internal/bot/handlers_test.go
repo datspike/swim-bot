@@ -213,6 +213,30 @@ func TestStats_WithTriggers(t *testing.T) {
 	}
 }
 
+func TestValidateRateLimitConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		daily       int
+		rbSize      int
+		rbThreshold int
+		wantErr     bool
+	}{
+		{name: "valid", daily: 1, rbSize: 1, rbThreshold: 0},
+		{name: "negative threshold", daily: 4, rbSize: 20, rbThreshold: -1, wantErr: true},
+		{name: "zero daily", daily: 0, rbSize: 20, rbThreshold: 2, wantErr: true},
+		{name: "zero ring buffer", daily: 4, rbSize: 0, rbThreshold: 2, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRateLimitConfig(tt.daily, tt.rbSize, tt.rbThreshold)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRateLimitConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestShouldAutoDeleteSpamReply(t *testing.T) {
 	tests := []struct {
 		name string

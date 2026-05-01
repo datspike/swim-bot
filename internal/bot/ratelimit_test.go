@@ -223,7 +223,7 @@ func TestProcessSpam_ReactiveStealToZero(t *testing.T) {
 	}
 }
 
-// TestProcessSpam_AlreadyKicked проверяет повторный restrict для уже ограниченного.
+// TestProcessSpam_AlreadyKicked проверяет пропуск повторного restrict для уже ограниченного.
 func TestProcessSpam_AlreadyKicked(t *testing.T) {
 	b, store := setupTestBot(t)
 	chatID := int64(-100001)
@@ -236,7 +236,10 @@ func TestProcessSpam_AlreadyKicked(t *testing.T) {
 	_ = store.MarkKicked(chatID, userID)
 
 	result, _ := b.processSpam(chatID, userID, cfg)
-	if result.Action != storage.ActionRestrict {
-		t.Errorf("Action = %d, want Restrict", result.Action)
+	if !result.AlreadyRestricted {
+		t.Error("ожидался признак уже ограниченного пользователя")
+	}
+	if result.Action != 0 {
+		t.Errorf("Action = %d, want 0", result.Action)
 	}
 }
