@@ -314,3 +314,47 @@ func TestShouldAutoDeleteSpamReply(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldDeleteBotMessage_ConfiguredBotWithTTL(t *testing.T) {
+	msg := &tele.Message{Sender: &tele.User{IsBot: true, Username: "Clown_Alert_Bot"}}
+	rule := &storage.BotDeleteRule{BotUsername: "clown_alert_bot", TTLSec: 60}
+
+	if !shouldDeleteBotMessage(msg, rule) {
+		t.Fatal("ожидалось автоудаление для настроенного bot-аккаунта")
+	}
+}
+
+func TestShouldDeleteBotMessage_RegularUserIgnored(t *testing.T) {
+	msg := &tele.Message{Sender: &tele.User{IsBot: false, Username: "clown_alert_bot"}}
+	rule := &storage.BotDeleteRule{BotUsername: "clown_alert_bot", TTLSec: 60}
+
+	if shouldDeleteBotMessage(msg, rule) {
+		t.Fatal("не ожидалось автоудаление для обычного пользователя")
+	}
+}
+
+func TestShouldDeleteBotMessage_EmptyUsernameIgnored(t *testing.T) {
+	msg := &tele.Message{Sender: &tele.User{IsBot: true}}
+	rule := &storage.BotDeleteRule{BotUsername: "clown_alert_bot", TTLSec: 60}
+
+	if shouldDeleteBotMessage(msg, rule) {
+		t.Fatal("не ожидалось автоудаление для bot-аккаунта без username")
+	}
+}
+
+func TestShouldDeleteBotMessage_NoRuleIgnored(t *testing.T) {
+	msg := &tele.Message{Sender: &tele.User{IsBot: true, Username: "clown_alert_bot"}}
+
+	if shouldDeleteBotMessage(msg, nil) {
+		t.Fatal("не ожидалось автоудаление без правила")
+	}
+}
+
+func TestShouldDeleteBotMessage_ZeroTTLIgnored(t *testing.T) {
+	msg := &tele.Message{Sender: &tele.User{IsBot: true, Username: "clown_alert_bot"}}
+	rule := &storage.BotDeleteRule{BotUsername: "clown_alert_bot", TTLSec: 0}
+
+	if shouldDeleteBotMessage(msg, rule) {
+		t.Fatal("не ожидалось автоудаление при ttl=0")
+	}
+}

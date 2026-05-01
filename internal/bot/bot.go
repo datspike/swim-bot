@@ -100,6 +100,9 @@ func (b *Bot) registerHandlers() {
 	privateGroup.Handle("/setspamlog", b.handleSetSpamLog)
 	privateGroup.Handle("/communitybanstatus", b.handleCommunityBanStatus)
 	privateGroup.Handle("/setspamdelete", b.handleSetSpamDelete)
+	privateGroup.Handle("/setbotdelete", b.handleSetBotDelete)
+	privateGroup.Handle("/delbotdelete", b.handleDelBotDelete)
+	privateGroup.Handle("/listbotdelete", b.handleListBotDelete)
 
 	// все типы сообщений — единый роутер: спам-детекция
 	for _, event := range []string{tele.OnText, tele.OnPhoto, tele.OnDocument, tele.OnSticker, tele.OnVideo, tele.OnAnimation} {

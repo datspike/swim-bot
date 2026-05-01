@@ -23,6 +23,7 @@ func (b *Bot) handleStart(c tele.Context) error {
 1. /setbot <chat_id> @username — указать спам-бота
 2. /setcommunityban <chat_id> on|off — включить голосование против цитатного спама
 3. /setspamlog <chat_id> <target_chat_id> — указать чат для логов community-ban
+4. /setbotdelete <chat_id> @bot_username <seconds> — автоудалять прямые сообщения от bot-аккаунта
 
 /help — подробная справка`
 
@@ -58,6 +59,20 @@ func (b *Bot) handleHelp(c tele.Context) error {
   TTL автоудаления спам-сообщений (через tracked bot) в секундах.
   0 = выключено.
   Пример: /setspamdelete -100123456789 60
+
+/setbotdelete <chat_id> <bot_username> <seconds>
+  Автоудаляет прямые сообщения от указанного bot-аккаунта через TTL.
+  Работает только для message.sender.is_bot, не для inline via_bot.
+  0 = удалить правило.
+  Пример: /setbotdelete -100123456789 clown_alert_bot 60
+
+/delbotdelete <chat_id> <bot_username>
+  Удаляет правило автоудаления прямых bot-сообщений.
+  Пример: /delbotdelete -100123456789 clown_alert_bot
+
+/listbotdelete <chat_id>
+  Показывает правила автоудаления прямых bot-сообщений.
+  Пример: /listbotdelete -100123456789
 
 Режимы и обслуживание:
 /testmode <chat_id> on|off
@@ -636,6 +651,114 @@ func (b *Bot) handleSetSpamDelete(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Автоудаление спам-сообщений для чата %d: %d сек.", chatID, ttlSec))
 }
 
+// handleSetBotDelete обрабатывает команду /setbotdelete <chat_id> <bot_username> <seconds>.
+func (b *Bot) handleSetBotDelete(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 3 {
+		return c.Send("Использование: /setbotdelete <chat_id> <bot_username> <seconds>")
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+	botUsername, err := storage.NormalizeBotUsername(args[1])
+	if err != nil {
+		return c.Send("Неверный bot_username. Укажи username bot-аккаунта.")
+	}
+	ttlSec, err := strconv.Atoi(args[2])
+	if err != nil || ttlSec < 0 {
+		return c.Send("Неверный seconds. Укажи целое число >= 0.")
+	}
+
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setbotdelete"); !ok {
+		return c.Send(response)
+	}
+
+	if err := b.storage.SetBotDeleteRule(chatID, botUsername, ttlSec); err != nil {
+		b.logger.Error("set bot delete rule failed", "chat_id", chatID, "bot_username", botUsername, "ttl_sec", ttlSec, "error", err)
+		return c.Send("Не удалось сохранить правило автоудаления bot-сообщений.")
+	}
+
+	b.logger.Info("bot delete rule updated", "chat_id", chatID, "bot_username", botUsername, "ttl_sec", ttlSec, "by_user", c.Sender().ID)
+	if ttlSec == 0 {
+		return c.Send(fmt.Sprintf("Автоудаление сообщений от @%s в чате %d выключено.", botUsername, chatID))
+	}
+	return c.Send(fmt.Sprintf("Автоудаление сообщений от @%s в чате %d: %d сек.", botUsername, chatID, ttlSec))
+}
+
+// handleDelBotDelete обрабатывает команду /delbotdelete <chat_id> <bot_username>.
+func (b *Bot) handleDelBotDelete(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /delbotdelete <chat_id> <bot_username>")
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+	botUsername, err := storage.NormalizeBotUsername(args[1])
+	if err != nil {
+		return c.Send("Неверный bot_username. Укажи username bot-аккаунта.")
+	}
+
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "delbotdelete"); !ok {
+		return c.Send(response)
+	}
+
+	if err := b.storage.DeleteBotDeleteRule(chatID, botUsername); err != nil {
+		b.logger.Error("delete bot delete rule failed", "chat_id", chatID, "bot_username", botUsername, "error", err)
+		return c.Send("Не удалось удалить правило автоудаления bot-сообщений.")
+	}
+
+	b.logger.Info("bot delete rule deleted", "chat_id", chatID, "bot_username", botUsername, "by_user", c.Sender().ID)
+	return c.Send(fmt.Sprintf("Правило автоудаления сообщений от @%s в чате %d удалено.", botUsername, chatID))
+}
+
+// handleListBotDelete обрабатывает команду /listbotdelete <chat_id>.
+func (b *Bot) handleListBotDelete(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("Использование: /listbotdelete <chat_id>")
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "listbotdelete"); !ok {
+		return c.Send(response)
+	}
+
+	rules, err := b.storage.ListBotDeleteRules(chatID)
+	if err != nil {
+		b.logger.Error("list bot delete rules failed", "chat_id", chatID, "error", err)
+		return c.Send("Не удалось получить правила автоудаления bot-сообщений.")
+	}
+	if len(rules) == 0 {
+		return c.Send(fmt.Sprintf("Для чата %d нет правил автоудаления bot-сообщений.", chatID))
+	}
+
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Правила автоудаления bot-сообщений для чата %d:", chatID)
+	for _, rule := range rules {
+		fmt.Fprintf(&builder, "\n- @%s: %d сек.", rule.BotUsername, rule.TTLSec)
+	}
+	builder.WriteString("\n\nУдалить правило: /delbotdelete <chat_id> <bot_username>")
+	return c.Send(builder.String())
+}
+
+func (b *Bot) ensureCommandSenderIsAdmin(c tele.Context, chatID int64, action string) (allowed bool, response string) {
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("command admin check failed", "action", action, "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return false, fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID)
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return false, fmt.Sprintf("Ты не администратор чата %d.", chatID)
+	}
+	return true, ""
+}
+
 // handleMessage — единый роутер для всех типов сообщений.
 // Групповые сообщения -> спам-детекция.
 func (b *Bot) handleMessage(c tele.Context) error {
@@ -666,6 +789,22 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 
 	if cfg == nil || !cfg.IsActive {
 		return nil
+	}
+
+	if botUsername := botSenderUsername(msg); botUsername != "" {
+		rule, ruleErr := b.storage.GetBotDeleteRule(chatID, botUsername)
+		if ruleErr != nil {
+			b.logger.Error("get bot delete rule failed", "chat_id", chatID, "bot_username", botUsername, "error", ruleErr)
+			return nil
+		}
+		if shouldDeleteBotMessage(msg, rule) {
+			ttl := time.Duration(rule.TTLSec) * time.Second
+			b.scheduleMessageDelete(chatID, msg.ID, ttl, "bot message")
+			b.logger.Info("bot message delete scheduled",
+				"chat_id", chatID, "bot_username", botUsername,
+				"message_id", msg.ID, "ttl_sec", rule.TTLSec)
+			return nil
+		}
 	}
 
 	// детекция спама: via_bot
@@ -818,6 +957,27 @@ func shouldDeleteAdminSpam(role tele.MemberStatus, ttlSec int) bool {
 	return isChatAdmin(role) && ttlSec > 0
 }
 
+// botSenderUsername возвращает username прямого отправителя-бота.
+func botSenderUsername(msg *tele.Message) string {
+	if msg == nil || msg.Sender == nil || !msg.Sender.IsBot {
+		return ""
+	}
+	username, err := storage.NormalizeBotUsername(msg.Sender.Username)
+	if err != nil {
+		return ""
+	}
+	return username
+}
+
+// shouldDeleteBotMessage проверяет применимость правила автоудаления к bot-сообщению.
+func shouldDeleteBotMessage(msg *tele.Message, rule *storage.BotDeleteRule) bool {
+	if rule == nil || rule.TTLSec <= 0 {
+		return false
+	}
+	botUsername := botSenderUsername(msg)
+	return botUsername != "" && botUsername == rule.BotUsername
+}
+
 func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
 	time.AfterFunc(spamReplyAutoDeleteTTL, func() {
 		replyMsg := &tele.Message{
@@ -833,15 +993,19 @@ func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
 }
 
 func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int, ttl time.Duration) {
+	b.scheduleMessageDelete(chatID, messageID, ttl, "spam message")
+}
+
+func (b *Bot) scheduleMessageDelete(chatID int64, messageID int, ttl time.Duration, reason string) {
 	time.AfterFunc(ttl, func() {
-		spamMsg := &tele.Message{
+		message := &tele.Message{
 			ID:   messageID,
 			Chat: &tele.Chat{ID: chatID},
 		}
 		if err := withRetry(func() error {
-			return b.bot.Delete(spamMsg)
+			return b.bot.Delete(message)
 		}, b.logger); err != nil {
-			b.logger.Warn("spam message delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
+			b.logger.Warn("message delete failed", "reason", reason, "chat_id", chatID, "message_id", messageID, "error", err)
 		}
 	})
 }
