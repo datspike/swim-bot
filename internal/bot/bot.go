@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/datspike/swim-bot/internal/bot/webhook"
 	"github.com/datspike/swim-bot/internal/storage"
 
 	tele "gopkg.in/telebot.v3"
@@ -54,8 +55,12 @@ type Config struct {
 // New создаёт и настраивает Telegram бота с webhook poller.
 func New(cfg Config) (*Bot, error) {
 	settings := tele.Settings{
-		Token:   cfg.Token,
-		Poller:  newSafeWebhook(cfg),
+		Token: cfg.Token,
+		Poller: webhook.New(webhook.Config{
+			Port:        cfg.Port,
+			PublicURL:   cfg.WebhookURL,
+			SecretToken: cfg.WebhookSecret,
+		}),
 		OnError: makeErrorHandler(cfg.Logger),
 	}
 

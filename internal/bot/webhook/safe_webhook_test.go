@@ -1,4 +1,4 @@
-package bot
+package webhook
 
 import (
 	"encoding/json"
@@ -12,6 +12,7 @@ import (
 )
 
 func TestSafeWebhookReportsListenError(t *testing.T) {
+	// ошибка запуска listener передаётся в telebot OnError
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/botTEST_TOKEN/setWebhook" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -28,12 +29,10 @@ func TestSafeWebhookReportsListenError(t *testing.T) {
 	defer listener.Close()
 
 	errorCh := make(chan error, 1)
-	poller := &safeWebhook{
-		Listen: listener.Addr().String(),
-		Endpoint: &tele.WebhookEndpoint{
-			PublicURL: "https://example.com/swim-bot/webhook",
-		},
-	}
+	poller := New(Config{
+		Listen:    listener.Addr().String(),
+		PublicURL: "https://example.com/swim-bot/webhook",
+	})
 
 	tb, err := tele.NewBot(tele.Settings{
 		Token:   "TEST_TOKEN",
@@ -61,6 +60,7 @@ func TestSafeWebhookReportsListenError(t *testing.T) {
 }
 
 func TestSafeWebhookStopDoesNotPanic(t *testing.T) {
+	// остановка telebot не вызывает повторное закрытие stop-канала
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/botTEST_TOKEN/setWebhook" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -70,10 +70,10 @@ func TestSafeWebhookStopDoesNotPanic(t *testing.T) {
 	}))
 	defer api.Close()
 
-	poller := &safeWebhook{
-		Endpoint:    &tele.WebhookEndpoint{PublicURL: "https://example.com/swim-bot/webhook"},
+	poller := New(Config{
+		PublicURL:   "https://example.com/swim-bot/webhook",
 		SecretToken: "secret",
-	}
+	})
 
 	tb, err := tele.NewBot(tele.Settings{
 		Token:   "TEST_TOKEN",
@@ -101,5 +101,22 @@ func TestSafeWebhookStopDoesNotPanic(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("bot did not stop in time")
+	}
+}
+
+func TestNewSetsWebhookParams(t *testing.T) {
+	// config явно задаёт public url и secret token
+	poller := New(Config{
+		Port:        8080,
+		PublicURL:   "https://example.com/swim-bot/webhook",
+		SecretToken: "secret",
+	})
+
+	params := poller.getParams()
+	if params["url"] != "https://example.com/swim-bot/webhook" {
+		t.Fatalf("url = %q, want public url", params["url"])
+	}
+	if params["secret_token"] != "secret" {
+		t.Fatalf("secret_token = %q, want secret", params["secret_token"])
 	}
 }
