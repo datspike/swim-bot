@@ -29,6 +29,7 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 		"migrations/002_smart_kick.sql",
 		"migrations/003_bot_hardening.sql",
 		"migrations/004_community_ban.sql",
+		"migrations/005_spam_delete_ttl.sql",
 	}
 
 	// применяем миграции по порядку

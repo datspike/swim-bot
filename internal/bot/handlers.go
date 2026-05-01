@@ -30,56 +30,72 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 // handleHelp обрабатывает команду /help.
 func (b *Bot) handleHelp(c tele.Context) error {
-	msg := `Команды:
+	msg := `Полная справка по командам swim-bot
 
+Базовые:
+/start — краткое приветствие и быстрый старт.
+/help — эта подробная справка.
+
+Настройка детекции:
 /setbot <chat_id> @username
-Указать, какого inline-бота отслеживать в чате.
-Пример: /setbot -100123456789 @mlversebot
+  Назначает inline-бота, через которого считаем сообщения спамом (via_bot).
+  Пример: /setbot -100123456789 @mlversebot
 
-/setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N]
-Настроить лимиты.
-Пример: /setlimits -100123456789 daily=6 rb_size=30 rb_threshold=3
-Опция: rb_steal=off — явно отключить "воровство попытки" (reactive-штраф).
+/setlimits <chat_id> [daily=N] [rb_size=N] [rb_threshold=N] [rb_steal=on|off]
+  Настраивает лимиты:
+  - daily: суточный лимит срабатываний до restrict,
+  - rb_size: размер скользящего окна сообщений,
+  - rb_threshold: порог спам-событий в окне для reactive-контекста,
+  - rb_steal=off: отключает reactive-штраф ("воровство попытки").
+  Пример: /setlimits -100123456789 daily=6 rb_size=30 rb_threshold=3 rb_steal=on
 
 /getlimits <chat_id>
-Показать текущие настройки лимитов.
-Пример: /getlimits -100123456789
+  Показывает текущие лимиты и связанные настройки.
+  Пример: /getlimits -100123456789
 
+/setspamdelete <chat_id> <seconds>
+  TTL автоудаления спам-сообщений (через tracked bot) в секундах.
+  0 = выключено.
+  Пример: /setspamdelete -100123456789 60
+
+Режимы и обслуживание:
 /testmode <chat_id> on|off
-Включить/выключить тестовый режим (отладочный вывод [ТЕСТ M/N rb:X/Y], админы защищены от restrict).
-Пример: /testmode -100123456789 on
+  Включает/выключает тестовый режим:
+  - добавляет в ответы отладочный префикс [ТЕСТ M/N rb:X/Y],
+  - защищает админов от тестового restrict.
+  Пример: /testmode -100123456789 on
 
-/resetcounters <chat_id>
-Сбросить все спам-счётчики за сегодня (только в тестовом режиме).
-Пример: /resetcounters -100123456789
-Опция: force=on — разрешить сброс вне тестового режима и отправить уведомление в target-чат.
+/resetcounters <chat_id> [force=on]
+  Сбрасывает дневные spam-счётчики в чате.
+  По умолчанию доступно только в test mode.
+  force=on — разрешает сброс вне test mode и отправляет уведомление в чат.
+  Пример: /resetcounters -100123456789 force=on
 
 /stats <chat_id>
-Показать статистику срабатываний.
-Пример: /stats -100123456789
+  Статистика срабатываний: количество, последний триггер, статус активации.
+  Пример: /stats -100123456789
 
+Community-ban (цитатный спам):
 /setcommunityban <chat_id> on|off
-Включить/выключить community-ban для цитатного спама.
-Пример: /setcommunityban -100123456789 on
+  Включает/выключает community-ban для подозрительных цитат из каналов.
+  Пример: /setcommunityban -100123456789 on
 
 /setspamlog <chat_id> <target_chat_id>
-Настроить чат для логов и копий community-ban кейсов.
-Пример: /setspamlog -100123456789 -100987654321
+  Назначает чат для логов и копий community-ban кейсов.
+  Пример: /setspamlog -100123456789 -100987654321
 
 /communitybanstatus <chat_id>
-Показать состояние community-ban и log chat.
-Пример: /communitybanstatus -100123456789
+  Показывает статус community-ban и текущий log-chat.
+  Пример: /communitybanstatus -100123456789
 
-Как узнать chat_id:
-1. Добавь @raw_data_bot в чат
-2. Отправь любое сообщение
-3. Бот покажет chat_id
+Как получить chat_id:
+1) Добавь @raw_data_bot в нужный чат.
+2) Отправь любое сообщение.
+3) Возьми числовой chat_id из ответа.
 
-Как это работает:
-1. Добавь меня в чат как администратора
-2. Настрой /setbot
-3. Пользователь спамит -> предупреждения -> restrict до конца дня
-4. Для цитатного спама можно включить community-ban с голосованием участников`
+Важно:
+- Все команды настройки выполняются в ЛС с этим ботом.
+- Для указанного <chat_id> ты должен быть администратором/владельцем.`
 
 	return c.Send(msg)
 }
@@ -566,6 +582,42 @@ func (b *Bot) handleCommunityBanStatus(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Community-ban для чата %d:\n- статус: %s\n- log chat: %s", chatID, status, logChat))
 }
 
+// handleSetSpamDelete обрабатывает команду /setspamdelete <chat_id> <seconds>.
+func (b *Bot) handleSetSpamDelete(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /setspamdelete <chat_id> <seconds>")
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+	ttlSec, err := strconv.Atoi(args[1])
+	if err != nil || ttlSec < 0 {
+		return c.Send("Неверный seconds. Укажи целое число >= 0.")
+	}
+
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("setspamdelete admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	if err := b.storage.SetSpamDeleteTTL(chatID, ttlSec); err != nil {
+		b.logger.Error("set spam delete ttl failed", "chat_id", chatID, "ttl_sec", ttlSec, "error", err)
+		return c.Send("Не удалось обновить TTL автоудаления.")
+	}
+
+	b.logger.Info("spam delete ttl updated", "chat_id", chatID, "ttl_sec", ttlSec, "by_user", c.Sender().ID)
+	if ttlSec == 0 {
+		return c.Send(fmt.Sprintf("Автоудаление спам-сообщений для чата %d выключено.", chatID))
+	}
+	return c.Send(fmt.Sprintf("Автоудаление спам-сообщений для чата %d: %d сек.", chatID, ttlSec))
+}
+
 // handleMessage — единый роутер для всех типов сообщений.
 // Групповые сообщения -> спам-детекция.
 func (b *Bot) handleMessage(c tele.Context) error {
@@ -690,6 +742,11 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 		}
 	}
 
+	ttl := time.Duration(cfg.SpamDeleteTTLSec) * time.Second
+	if ttl > 0 {
+		b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
+	}
+
 	ctx := b.detectContext(chatID, msg.Sender.ID, cfg)
 
 	logErr := b.storage.InsertActionLog(chatID, msg.Sender.ID, int64(msg.ID), replyMsgID, ctx, result.Action)
@@ -729,6 +786,20 @@ func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
 			return b.bot.Delete(replyMsg)
 		}, b.logger); err != nil {
 			b.logger.Warn("spam warning reply delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
+		}
+	})
+}
+
+func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int, ttl time.Duration) {
+	time.AfterFunc(ttl, func() {
+		spamMsg := &tele.Message{
+			ID:   messageID,
+			Chat: &tele.Chat{ID: chatID},
+		}
+		if err := withRetry(func() error {
+			return b.bot.Delete(spamMsg)
+		}, b.logger); err != nil {
+			b.logger.Warn("spam message delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
 		}
 	})
 }
