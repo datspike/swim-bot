@@ -66,58 +66,70 @@ func (b *Bot) processSpam(chatID, userID int64, cfg *storage.ChatConfig) (*spamR
 		if err != nil {
 			return nil, err
 		}
-		remaining = counter.EffectiveLimit - counter.Count
-
-		if remaining <= 0 {
-			// штраф + лимит исчерпан
-			return &spamResult{
-				Action:      storage.ActionRestrict,
-				Remaining:   0,
-				Count:       counter.Count,
-				Limit:       counter.EffectiveLimit,
-				RBSpamCount: rbSpamCount,
-				RBThreshold: rbThreshold,
-				Message:     "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
-			}, nil
-		}
-
-		// штраф, ещё есть попытки
-		return &spamResult{
-			Action:      storage.ActionWarning,
-			Remaining:   remaining,
-			Count:       counter.Count,
-			Limit:       counter.EffectiveLimit,
-			RBSpamCount: rbSpamCount,
-			RBThreshold: rbThreshold,
-			Message:     "Группами плавать нежелательно, ворую попытку, осталось: " + itoa(remaining),
-		}, nil
+		return buildReactiveSpamResult(counter, rbSpamCount, rbThreshold), nil
 	}
 
-	// определяем действие
-	switch {
-	case remaining <= 0:
-		// лимит исчерпан -> restrict
-		return &spamResult{
-			Action:      storage.ActionRestrict,
-			Remaining:   0,
-			Count:       counter.Count,
-			Limit:       counter.EffectiveLimit,
-			RBSpamCount: rbSpamCount,
-			RBThreshold: rbThreshold,
-			Message:     "Все, на сегодня наплавались",
-		}, nil
+	return buildOrganicSpamResult(counter, rbSpamCount, rbThreshold), nil
+}
 
-	default:
-		// ещё есть попытки — предупреждение
-		return &spamResult{
-			Action:      storage.ActionWarning,
-			Remaining:   remaining,
-			Count:       counter.Count,
-			Limit:       counter.EffectiveLimit,
-			RBSpamCount: rbSpamCount,
-			RBThreshold: rbThreshold,
-			Message:     formatRemaining(remaining),
-		}, nil
+// buildOrganicSpamResult формирует результат обычного расхода попытки.
+func buildOrganicSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThreshold int) *spamResult {
+	remaining := counter.EffectiveLimit - counter.Count
+	if remaining <= 0 {
+		return newSpamResult(
+			storage.ActionRestrict,
+			0,
+			counter,
+			rbSpamCount,
+			rbThreshold,
+			"Все, на сегодня наплавались",
+		)
+	}
+
+	return newSpamResult(
+		storage.ActionWarning,
+		remaining,
+		counter,
+		rbSpamCount,
+		rbThreshold,
+		formatRemaining(remaining),
+	)
+}
+
+// buildReactiveSpamResult формирует результат расхода попытки с reactive-штрафом.
+func buildReactiveSpamResult(counter *storage.SpamCounter, rbSpamCount, rbThreshold int) *spamResult {
+	remaining := counter.EffectiveLimit - counter.Count
+	if remaining <= 0 {
+		return newSpamResult(
+			storage.ActionRestrict,
+			0,
+			counter,
+			rbSpamCount,
+			rbThreshold,
+			"Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
+		)
+	}
+
+	return newSpamResult(
+		storage.ActionWarning,
+		remaining,
+		counter,
+		rbSpamCount,
+		rbThreshold,
+		"Группами плавать нежелательно, ворую попытку, осталось: "+itoa(remaining),
+	)
+}
+
+// newSpamResult собирает общий результат обработки спама.
+func newSpamResult(action storage.SpamAction, remaining int, counter *storage.SpamCounter, rbSpamCount, rbThreshold int, message string) *spamResult {
+	return &spamResult{
+		Action:      action,
+		Remaining:   remaining,
+		Count:       counter.Count,
+		Limit:       counter.EffectiveLimit,
+		RBSpamCount: rbSpamCount,
+		RBThreshold: rbThreshold,
+		Message:     message,
 	}
 }
 

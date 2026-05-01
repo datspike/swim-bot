@@ -19,6 +19,25 @@ type Bot struct {
 	logger        *slog.Logger
 	ringBuffers   ChatRingBuffers // скользящие окна сообщений per-chat
 	maxMessageAge time.Duration   // порог пропуска старых сообщений (webhook backlog)
+	scheduler     botScheduler
+}
+
+// botScheduler задаёт внутренний Seam для времени и отложенных действий.
+type botScheduler interface {
+	Now() time.Time
+	AfterFunc(time.Duration, func())
+}
+
+type realBotScheduler struct{}
+
+// Now возвращает текущее время.
+func (realBotScheduler) Now() time.Time {
+	return time.Now()
+}
+
+// AfterFunc планирует отложенное действие.
+func (realBotScheduler) AfterFunc(delay time.Duration, callback func()) {
+	time.AfterFunc(delay, callback)
 }
 
 // Config содержит параметры для создания бота.
@@ -55,6 +74,7 @@ func New(cfg Config) (*Bot, error) {
 		storage:       cfg.Storage,
 		logger:        cfg.Logger,
 		maxMessageAge: maxAge,
+		scheduler:     realBotScheduler{},
 	}
 
 	// регистрация хендлеров

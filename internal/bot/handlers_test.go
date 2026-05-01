@@ -217,6 +217,48 @@ func TestStats_WithTriggers(t *testing.T) {
 	}
 }
 
+func TestParseChatIDArg(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantChatID  int64
+		wantOK      bool
+		wantMessage string
+	}{
+		{
+			name:        "missing chat id",
+			args:        nil,
+			wantMessage: "usage",
+		},
+		{
+			name:        "invalid chat id",
+			args:        []string{"abc"},
+			wantMessage: "invalid",
+		},
+		{
+			name:       "valid chat id",
+			args:       []string{"-100123"},
+			wantChatID: -100123,
+			wantOK:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatID, ok, message := parseChatIDArg(tt.args, "usage", "invalid")
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if chatID != tt.wantChatID {
+				t.Fatalf("chatID = %d, want %d", chatID, tt.wantChatID)
+			}
+			if message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", message, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestValidateRateLimitConfig(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -281,6 +323,149 @@ func TestShouldDeleteAdminSpam(t *testing.T) {
 				t.Fatalf("shouldDeleteAdminSpam(%q, %d) = %v, want %v", tt.role, tt.ttlSec, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsMessageOlderThan(t *testing.T) {
+	now := time.Date(2026, 5, 1, 20, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		messageTime time.Time
+		want        bool
+	}{
+		{
+			name:        "inside age",
+			messageTime: now.Add(-29 * time.Second),
+		},
+		{
+			name:        "equal age",
+			messageTime: now.Add(-30 * time.Second),
+		},
+		{
+			name:        "older than age",
+			messageTime: now.Add(-31 * time.Second),
+			want:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMessageOlderThan(tt.messageTime, 30*time.Second, now)
+			if got != tt.want {
+				t.Fatalf("isMessageOlderThan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsTrackedBotSpam(t *testing.T) {
+	tests := []struct {
+		name       string
+		message    *tele.Message
+		trackedBot string
+		want       bool
+	}{
+		{
+			name:       "matching via bot",
+			message:    &tele.Message{Sender: &tele.User{ID: 1}, Via: &tele.User{Username: "MLVerseBot"}},
+			trackedBot: "mlversebot",
+			want:       true,
+		},
+		{
+			name:       "wrong via bot",
+			message:    &tele.Message{Sender: &tele.User{ID: 1}, Via: &tele.User{Username: "otherbot"}},
+			trackedBot: "mlversebot",
+		},
+		{
+			name:       "nil sender",
+			message:    &tele.Message{Via: &tele.User{Username: "mlversebot"}},
+			trackedBot: "mlversebot",
+		},
+		{
+			name:       "nil via",
+			message:    &tele.Message{Sender: &tele.User{ID: 1}},
+			trackedBot: "mlversebot",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTrackedBotSpam(tt.message, tt.trackedBot)
+			if got != tt.want {
+				t.Fatalf("isTrackedBotSpam() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+type recordingScheduler struct {
+	now    time.Time
+	delays []time.Duration
+}
+
+func (s *recordingScheduler) Now() time.Time {
+	return s.now
+}
+
+func (s *recordingScheduler) AfterFunc(delay time.Duration, _ func()) {
+	s.delays = append(s.delays, delay)
+}
+
+func TestBuildUnrestrictChatMemberAt(t *testing.T) {
+	now := time.Date(2026, 5, 1, 20, 0, 0, 0, time.UTC)
+	member := buildUnrestrictChatMemberAt(123, now)
+	wantUntil := now.Add(unrestrictStatusClearDelay).Unix()
+
+	if member.User.ID != 123 {
+		t.Fatalf("User.ID = %d, want 123", member.User.ID)
+	}
+	if member.RestrictedUntil != wantUntil {
+		t.Fatalf("RestrictedUntil = %d, want %d", member.RestrictedUntil, wantUntil)
+	}
+	if !member.Independent {
+		t.Fatalf("Rights.Independent = false, want true")
+	}
+}
+
+func TestEndOfDayUTCAt(t *testing.T) {
+	tests := []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{
+			name: "normal day",
+			now:  time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+			want: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "less than thirty seconds",
+			now:  time.Date(2026, 5, 1, 23, 59, 45, 0, time.UTC),
+			want: time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := endOfDayUTCAt(tt.now)
+			if got != tt.want.Unix() {
+				t.Fatalf("endOfDayUTCAt() = %d, want %d", got, tt.want.Unix())
+			}
+		})
+	}
+}
+
+func TestScheduleMessageDeleteUsesScheduler(t *testing.T) {
+	scheduler := &recordingScheduler{now: time.Date(2026, 5, 1, 20, 0, 0, 0, time.UTC)}
+	bot := &Bot{scheduler: scheduler, logger: testLogger()}
+
+	bot.scheduleMessageDelete(-100, 42, 15*time.Second, "test")
+
+	if len(scheduler.delays) != 1 {
+		t.Fatalf("scheduled deletes = %d, want 1", len(scheduler.delays))
+	}
+	if scheduler.delays[0] != 15*time.Second {
+		t.Fatalf("delay = %s, want 15s", scheduler.delays[0])
 	}
 }
 

@@ -46,6 +46,99 @@ func TestItoa(t *testing.T) {
 	}
 }
 
+func TestBuildOrganicSpamResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		count      int
+		limit      int
+		wantAction storage.SpamAction
+		wantLeft   int
+		wantText   string
+	}{
+		{
+			name:       "warning",
+			count:      1,
+			limit:      4,
+			wantAction: storage.ActionWarning,
+			wantLeft:   3,
+			wantText:   "Вы можете поплавать ещё 3 раза",
+		},
+		{
+			name:       "restrict",
+			count:      4,
+			limit:      4,
+			wantAction: storage.ActionRestrict,
+			wantLeft:   0,
+			wantText:   "Все, на сегодня наплавались",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			counter := &storage.SpamCounter{Count: tt.count, EffectiveLimit: tt.limit}
+			got := buildOrganicSpamResult(counter, 2, 3)
+
+			if got.Action != tt.wantAction {
+				t.Fatalf("Action = %d, want %d", got.Action, tt.wantAction)
+			}
+			if got.Remaining != tt.wantLeft {
+				t.Fatalf("Remaining = %d, want %d", got.Remaining, tt.wantLeft)
+			}
+			if got.Message != tt.wantText {
+				t.Fatalf("Message = %q, want %q", got.Message, tt.wantText)
+			}
+			if got.RBSpamCount != 2 || got.RBThreshold != 3 {
+				t.Fatalf("ring buffer stats = %d/%d, want 2/3", got.RBSpamCount, got.RBThreshold)
+			}
+		})
+	}
+}
+
+func TestBuildReactiveSpamResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		count      int
+		limit      int
+		wantAction storage.SpamAction
+		wantLeft   int
+		wantText   string
+	}{
+		{
+			name:       "warning after steal",
+			count:      2,
+			limit:      4,
+			wantAction: storage.ActionWarning,
+			wantLeft:   2,
+			wantText:   "Группами плавать нежелательно, ворую попытку, осталось: 2",
+		},
+		{
+			name:       "restrict after steal",
+			count:      2,
+			limit:      2,
+			wantAction: storage.ActionRestrict,
+			wantLeft:   0,
+			wantText:   "Группами плавать нежелательно, ворую попытку. Все, на сегодня наплавались",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			counter := &storage.SpamCounter{Count: tt.count, EffectiveLimit: tt.limit}
+			got := buildReactiveSpamResult(counter, 2, 3)
+
+			if got.Action != tt.wantAction {
+				t.Fatalf("Action = %d, want %d", got.Action, tt.wantAction)
+			}
+			if got.Remaining != tt.wantLeft {
+				t.Fatalf("Remaining = %d, want %d", got.Remaining, tt.wantLeft)
+			}
+			if got.Message != tt.wantText {
+				t.Fatalf("Message = %q, want %q", got.Message, tt.wantText)
+			}
+		})
+	}
+}
+
 // setupTestBot создаёт Bot с in-memory storage для тестов processSpam.
 func setupTestBot(t *testing.T) (*Bot, *storage.Storage) {
 	t.Helper()

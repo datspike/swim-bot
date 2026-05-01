@@ -30,7 +30,7 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 Для настройки добавь меня в чат как администратора, затем:
 1. /setbot <chat_id> @username — указать спам-бота
-2. /setcommunityban <chat_id> on|off — включить голосование против цитатного спама
+2. /setcommunityban <chat_id> on|off — включить автобан цитатного спама
 3. /setspamlog <chat_id> <target_chat_id> — указать чат для логов community-ban
 4. /setbotdelete <chat_id> @bot_username <seconds> — автоудалять прямые сообщения от bot-аккаунта
 
@@ -140,15 +140,8 @@ func (b *Bot) handleSetBot(c tele.Context) error {
 
 	username := args[1]
 
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("setbot admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setbot"); !ok {
+		return c.Send(response)
 	}
 
 	// получаем название чата
@@ -176,25 +169,12 @@ func (b *Bot) handleSetBot(c tele.Context) error {
 // handleStats обрабатывает команду /stats <chat_id>.
 func (b *Bot) handleStats(c tele.Context) error {
 	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("Формат: /stats <chat_id>")
+	chatID, ok, response := parseChatIDArg(args, "Формат: /stats <chat_id>", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
-
-	// парсинг chat_id
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
-	}
-
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("stats admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "stats"); !ok {
+		return c.Send(response)
 	}
 
 	// получаем название чата
@@ -255,15 +235,8 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 		return c.Send("Неверный chat_id. Используй числовой ID чата.")
 	}
 
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("setlimits admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setlimits"); !ok {
+		return c.Send(response)
 	}
 
 	// получаем текущий конфиг для дефолтных значений
@@ -348,24 +321,12 @@ func (b *Bot) handleSetLimits(c tele.Context) error {
 // Показывает текущие настройки лимитов для чата.
 func (b *Bot) handleGetLimits(c tele.Context) error {
 	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("Формат: /getlimits <chat_id>")
+	chatID, ok, response := parseChatIDArg(args, "Формат: /getlimits <chat_id>", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
-
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
-	}
-
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("getlimits admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "getlimits"); !ok {
+		return c.Send(response)
 	}
 
 	cfg, err := b.storage.GetChatConfig(chatID)
@@ -387,9 +348,9 @@ func (b *Bot) handleTestMode(c tele.Context) error {
 		return c.Send("Использование: /testmode <chat_id> on|off")
 	}
 
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	chatID, ok, response := parseChatIDArg(args, "Использование: /testmode <chat_id> on|off", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
 
 	mode := strings.ToLower(args[1])
@@ -397,14 +358,8 @@ func (b *Bot) handleTestMode(c tele.Context) error {
 		return c.Send("Использование: /testmode <chat_id> on|off")
 	}
 
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("testmode admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "testmode"); !ok {
+		return c.Send(response)
 	}
 
 	// проверяем что чат существует в конфиге
@@ -425,6 +380,17 @@ func (b *Bot) handleTestMode(c tele.Context) error {
 		return c.Send(fmt.Sprintf("Тестовый режим включён для чата %d", chatID))
 	}
 	return c.Send(fmt.Sprintf("Тестовый режим выключен для чата %d", chatID))
+}
+
+func parseChatIDArg(args []string, usageText, invalidText string) (chatID int64, ok bool, response string) {
+	if len(args) < 1 {
+		return 0, false, usageText
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return 0, false, invalidText
+	}
+	return chatID, true, ""
 }
 
 func rbStealStatus(rbThreshold int) string {
@@ -461,14 +427,8 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		return c.Send("Неверный chat_id.")
 	}
 
-	// проверка прав администратора
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("resetcounters admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "resetcounters"); !ok {
+		return c.Send(response)
 	}
 
 	forceReset := false
@@ -494,7 +454,7 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		return c.Send("Сброс счётчиков доступен только в тестовом режиме.")
 	}
 
-	resetDate := time.Now().UTC().Format(time.DateOnly)
+	resetDate := b.activeScheduler().Now().UTC().Format(time.DateOnly)
 	kickedUsers, err := b.storage.ListKickedSpamCounterUsers(chatID, resetDate)
 	if err != nil {
 		b.logger.Error("list kicked spam counter users failed", "chat_id", chatID, "date", resetDate, "error", err)
@@ -530,6 +490,10 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 
 // buildUnrestrictChatMember создаёт параметры снятия дневных ограничений пользователя.
 func buildUnrestrictChatMember(userID int64) *tele.ChatMember {
+	return buildUnrestrictChatMemberAt(userID, realBotScheduler{}.Now())
+}
+
+func buildUnrestrictChatMemberAt(userID int64, now time.Time) *tele.ChatMember {
 	rights := tele.NoRestrictions()
 	rights.Independent = true
 
@@ -537,14 +501,15 @@ func buildUnrestrictChatMember(userID int64) *tele.ChatMember {
 		User:   &tele.User{ID: userID},
 		Rights: rights,
 		// Telegram оставляет status=restricted при until_date=0, поэтому даём короткий срок.
-		RestrictedUntil: time.Now().Add(unrestrictStatusClearDelay).Unix(),
+		RestrictedUntil: buildUnrestrictUntilAt(now),
 	}
 }
 
 // unrestrictUser снимает Telegram-ограничения пользователя с retry при FloodError.
 func (b *Bot) unrestrictUser(chatID, userID int64) error {
 	return withRetry(func() error {
-		return b.bot.Restrict(&tele.Chat{ID: chatID}, buildUnrestrictChatMember(userID))
+		member := buildUnrestrictChatMemberAt(userID, b.activeScheduler().Now())
+		return b.bot.Restrict(&tele.Chat{ID: chatID}, member)
 	}, b.logger)
 }
 
@@ -598,9 +563,9 @@ func (b *Bot) handleSetCommunityBan(c tele.Context) error {
 		return c.Send("Использование: /setcommunityban <chat_id> on|off")
 	}
 
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	chatID, ok, response := parseChatIDArg(args, "Использование: /setcommunityban <chat_id> on|off", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
 
 	mode := strings.ToLower(args[1])
@@ -608,13 +573,8 @@ func (b *Bot) handleSetCommunityBan(c tele.Context) error {
 		return c.Send("Использование: /setcommunityban <chat_id> on|off")
 	}
 
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("setcommunityban admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setcommunityban"); !ok {
+		return c.Send(response)
 	}
 
 	enabled := mode == "on"
@@ -637,22 +597,17 @@ func (b *Bot) handleSetSpamLog(c tele.Context) error {
 		return c.Send("Использование: /setspamlog <chat_id> <target_chat_id>")
 	}
 
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	chatID, ok, response := parseChatIDArg(args, "Использование: /setspamlog <chat_id> <target_chat_id>", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
 	targetChatID, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
 		return c.Send("Неверный target_chat_id. Используй числовой ID чата.")
 	}
 
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("setspamlog admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setspamlog"); !ok {
+		return c.Send(response)
 	}
 
 	if err := b.storage.SetSpamLogChatID(chatID, targetChatID); err != nil {
@@ -667,22 +622,12 @@ func (b *Bot) handleSetSpamLog(c tele.Context) error {
 // handleCommunityBanStatus обрабатывает команду /communitybanstatus <chat_id>.
 func (b *Bot) handleCommunityBanStatus(c tele.Context) error {
 	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("Использование: /communitybanstatus <chat_id>")
+	chatID, ok, response := parseChatIDArg(args, "Использование: /communitybanstatus <chat_id>", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
-
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
-	}
-
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("communitybanstatus admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "communitybanstatus"); !ok {
+		return c.Send(response)
 	}
 
 	cfg, err := b.storage.GetChatConfig(chatID)
@@ -712,22 +657,17 @@ func (b *Bot) handleSetSpamDelete(c tele.Context) error {
 	if len(args) < 2 {
 		return c.Send("Использование: /setspamdelete <chat_id> <seconds>")
 	}
-	chatID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	chatID, ok, response := parseChatIDArg(args, "Использование: /setspamdelete <chat_id> <seconds>", "Неверный chat_id. Используй числовой ID чата.")
+	if !ok {
+		return c.Send(response)
 	}
 	ttlSec, err := strconv.Atoi(args[1])
 	if err != nil || ttlSec < 0 {
 		return c.Send("Неверный seconds. Укажи целое число >= 0.")
 	}
 
-	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
-	if err != nil {
-		b.logger.Warn("setspamdelete admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
-		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
-	}
-	if member.Role != tele.Administrator && member.Role != tele.Creator {
-		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	if ok, response := b.ensureCommandSenderIsAdmin(c, chatID, "setspamdelete"); !ok {
+		return c.Send(response)
 	}
 
 	if err := b.storage.SetSpamDeleteTTL(chatID, ttlSec); err != nil {
@@ -865,7 +805,7 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 	}
 
 	// пропускаем старые сообщения — защита от webhook backlog (FR-011)
-	if time.Since(msg.Time()) > b.maxMessageAge {
+	if isMessageOlderThan(msg.Time(), b.maxMessageAge, b.activeScheduler().Now()) {
 		return nil
 	}
 
@@ -882,24 +822,12 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		return nil
 	}
 
-	if botUsername := botSenderUsername(msg); botUsername != "" {
-		rule, ruleErr := b.storage.GetBotDeleteRule(chatID, botUsername)
-		if ruleErr != nil {
-			b.logger.Error("get bot delete rule failed", "chat_id", chatID, "bot_username", botUsername, "error", ruleErr)
-			return nil
-		}
-		if shouldDeleteBotMessage(msg, rule) {
-			ttl := time.Duration(rule.TTLSec) * time.Second
-			b.scheduleMessageDelete(chatID, msg.ID, ttl, "bot message")
-			b.logger.Info("bot message delete scheduled",
-				"chat_id", chatID, "bot_username", botUsername,
-				"message_id", msg.ID, "ttl_sec", rule.TTLSec)
-			return nil
-		}
+	if b.handleConfiguredBotMessageDelete(chatID, msg) {
+		return nil
 	}
 
 	// детекция спама: via_bot
-	isSpam := msg.Sender != nil && msg.Via != nil && strings.EqualFold(msg.Via.Username, cfg.TrackedBot)
+	isSpam := isTrackedBotSpam(msg, cfg.TrackedBot)
 
 	// обновляем ring buffer (все сообщения)
 	if msg.Sender != nil {
@@ -937,13 +865,7 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		return nil
 	}
 	if isChatAdmin(adminMember.Role) {
-		if shouldDeleteAdminSpam(adminMember.Role, cfg.SpamDeleteTTLSec) {
-			ttl := time.Duration(cfg.SpamDeleteTTLSec) * time.Second
-			b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
-			b.logger.Info("admin spam delete scheduled",
-				"chat_id", chatID, "user_id", msg.Sender.ID,
-				"message_id", msg.ID, "ttl_sec", cfg.SpamDeleteTTLSec)
-		}
+		b.handleAdminSpam(chatID, msg, adminMember.Role, cfg.SpamDeleteTTLSec)
 		return nil
 	}
 
@@ -953,6 +875,40 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		"test_mode", cfg.TestMode)
 
 	return b.handleSpam(c, msg, cfg)
+}
+
+func (b *Bot) handleConfiguredBotMessageDelete(chatID int64, msg *tele.Message) bool {
+	botUsername := botSenderUsername(msg)
+	if botUsername == "" {
+		return false
+	}
+
+	rule, err := b.storage.GetBotDeleteRule(chatID, botUsername)
+	if err != nil {
+		b.logger.Error("get bot delete rule failed", "chat_id", chatID, "bot_username", botUsername, "error", err)
+		return true
+	}
+	if !shouldDeleteBotMessage(msg, rule) {
+		return false
+	}
+
+	ttl := time.Duration(rule.TTLSec) * time.Second
+	b.scheduleMessageDelete(chatID, msg.ID, ttl, "bot message")
+	b.logger.Info("bot message delete scheduled",
+		"chat_id", chatID, "bot_username", botUsername,
+		"message_id", msg.ID, "ttl_sec", rule.TTLSec)
+	return true
+}
+
+func (b *Bot) handleAdminSpam(chatID int64, msg *tele.Message, role tele.MemberStatus, ttlSec int) {
+	if !shouldDeleteAdminSpam(role, ttlSec) {
+		return
+	}
+	ttl := time.Duration(ttlSec) * time.Second
+	b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
+	b.logger.Info("admin spam delete scheduled",
+		"chat_id", chatID, "user_id", msg.Sender.ID,
+		"message_id", msg.ID, "ttl_sec", ttlSec)
 }
 
 // handleSpam обрабатывает спам (ring buffer + restrict).
@@ -1038,6 +994,16 @@ func shouldAutoDeleteSpamReply(text string) bool {
 	return strings.Contains(text, "Вы можете поплавать ещё")
 }
 
+// isMessageOlderThan проверяет возраст сообщения относительно текущего времени.
+func isMessageOlderThan(messageTime time.Time, maxAge time.Duration, now time.Time) bool {
+	return now.Sub(messageTime) > maxAge
+}
+
+// isTrackedBotSpam проверяет спам через отслеживаемого inline-бота.
+func isTrackedBotSpam(msg *tele.Message, trackedBot string) bool {
+	return msg != nil && msg.Sender != nil && msg.Via != nil && strings.EqualFold(msg.Via.Username, trackedBot)
+}
+
 // isChatAdmin проверяет роль администратора или владельца чата.
 func isChatAdmin(role tele.MemberStatus) bool {
 	return role == tele.Administrator || role == tele.Creator
@@ -1070,7 +1036,7 @@ func shouldDeleteBotMessage(msg *tele.Message, rule *storage.BotDeleteRule) bool
 }
 
 func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
-	time.AfterFunc(spamReplyAutoDeleteTTL, func() {
+	b.activeScheduler().AfterFunc(spamReplyAutoDeleteTTL, func() {
 		replyMsg := &tele.Message{
 			ID:   messageID,
 			Chat: &tele.Chat{ID: chatID},
@@ -1088,7 +1054,7 @@ func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int, ttl time.Du
 }
 
 func (b *Bot) scheduleMessageDelete(chatID int64, messageID int, ttl time.Duration, reason string) {
-	time.AfterFunc(ttl, func() {
+	b.activeScheduler().AfterFunc(ttl, func() {
 		message := &tele.Message{
 			ID:   messageID,
 			Chat: &tele.Chat{ID: chatID},
@@ -1127,7 +1093,7 @@ func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatC
 	chatMember := &tele.ChatMember{
 		User:            msg.Sender,
 		Rights:          rights,
-		RestrictedUntil: endOfDayUTC(),
+		RestrictedUntil: endOfDayUTCAt(b.activeScheduler().Now()),
 	}
 
 	err := withRetry(func() error {
@@ -1141,11 +1107,22 @@ func (b *Bot) restrictUser(c tele.Context, msg *tele.Message, cfg *storage.ChatC
 	b.logger.Info("user restricted", "chat_id", chatID, "user_id", msg.Sender.ID, "until", chatMember.RestrictedUntil, "test_mode", cfg.TestMode)
 }
 
-// endOfDayUTC возвращает Unix timestamp полуночи следующего дня UTC.
+func (b *Bot) activeScheduler() botScheduler {
+	if b.scheduler != nil {
+		return b.scheduler
+	}
+	return realBotScheduler{}
+}
+
+func buildUnrestrictUntilAt(now time.Time) int64 {
+	return now.Add(unrestrictStatusClearDelay).Unix()
+}
+
+// endOfDayUTCAt возвращает Unix timestamp полуночи следующего дня UTC.
 // Если до конца суток < 30 секунд — берёт конец следующих суток,
 // т.к. Telegram считает restrict < 30с бессрочным.
-func endOfDayUTC() int64 {
-	now := time.Now().UTC()
+func endOfDayUTCAt(now time.Time) int64 {
+	now = now.UTC()
 	endOfDay := now.Truncate(24 * time.Hour).Add(24 * time.Hour)
 	if endOfDay.Sub(now) < 30*time.Second {
 		endOfDay = endOfDay.Add(24 * time.Hour)

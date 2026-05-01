@@ -83,7 +83,7 @@ func (b *Bot) handleCommunityBanDetection(c tele.Context, msg *tele.Message, cfg
 }
 
 func (b *Bot) scheduleCommunityBanNoticeDelete(chatID int64, messageID int) {
-	time.AfterFunc(communityBanNoticeTTL, func() {
+	b.activeScheduler().AfterFunc(communityBanNoticeTTL, func() {
 		noticeMsg := &tele.Message{
 			ID:   messageID,
 			Chat: &tele.Chat{ID: chatID},
