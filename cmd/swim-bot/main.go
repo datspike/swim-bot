@@ -57,7 +57,6 @@ func run() error {
 		WebhookSecret: cfg.WebhookSecret,
 		Port:          cfg.Port,
 		MaxMessageAge: time.Duration(cfg.MaxMessageAgeSec) * time.Second,
-		SpamDeleteTTL: time.Duration(cfg.AutoDeleteSpamMessageSec) * time.Second,
 		Storage:       store,
 		Logger:        logger,
 	})

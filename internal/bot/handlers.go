@@ -742,12 +742,7 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 		}
 	}
 
-	ttl := b.spamDeleteTTL
-	if cfg.SpamDeleteTTLSec > 0 {
-		ttl = time.Duration(cfg.SpamDeleteTTLSec) * time.Second
-	} else if cfg.SpamDeleteTTLSec == 0 {
-		ttl = 0
-	}
+	ttl := time.Duration(cfg.SpamDeleteTTLSec) * time.Second
 	if ttl > 0 {
 		b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
 	}

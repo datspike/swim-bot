@@ -19,7 +19,6 @@ type Bot struct {
 	logger        *slog.Logger
 	ringBuffers   ChatRingBuffers // скользящие окна сообщений per-chat
 	maxMessageAge time.Duration   // порог пропуска старых сообщений (webhook backlog)
-	spamDeleteTTL time.Duration   // автоудаление спам-сообщений (0 = выключено)
 }
 
 // Config содержит параметры для создания бота.
@@ -29,7 +28,6 @@ type Config struct {
 	WebhookSecret string
 	Port          int
 	MaxMessageAge time.Duration // 0 = defaultMaxMessageAge (30s)
-	SpamDeleteTTL time.Duration // 0 = disabled
 	Storage       *storage.Storage
 	Logger        *slog.Logger
 }
@@ -57,7 +55,6 @@ func New(cfg Config) (*Bot, error) {
 		storage:       cfg.Storage,
 		logger:        cfg.Logger,
 		maxMessageAge: maxAge,
-		spamDeleteTTL: cfg.SpamDeleteTTL,
 	}
 
 	// регистрация хендлеров
