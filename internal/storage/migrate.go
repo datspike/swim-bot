@@ -31,6 +31,7 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 		"migrations/004_community_ban.sql",
 		"migrations/005_spam_delete_ttl.sql",
 		"migrations/006_bot_delete_rules.sql",
+		"migrations/007_drop_community_ban_voting.sql",
 	}
 
 	if currentVersion > len(migrations) {

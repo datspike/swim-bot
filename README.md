@@ -225,8 +225,6 @@ SQLite база задаётся через `DB_PATH`. При открытии �
 | `chat_config` | Настройки чата: tracked bot, активность, лимиты, test mode, community-ban, spam-log, TTL автоудаления. |
 | `action_log` | История spam-срабатываний. |
 | `spam_counter` | Дневные счётчики per-chat/per-user/per-date. |
-| `moderation_case` | Кейсы community-ban. |
-| `moderation_vote` | Голоса по moderation case. Сейчас основная runtime-ветка использует автоматический ban. |
 | `bot_delete_rule` | Per-chat правила автоудаления прямых сообщений от заданных Telegram bot-аккаунтов. |
 
 ## Архитектура проекта

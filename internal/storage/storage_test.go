@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -75,6 +76,7 @@ func TestWithDefaultPragmas(t *testing.T) {
 }
 
 func TestMigrateRejectsFutureSchemaVersion(t *testing.T) {
+	// проверка защиты от запуска старого бинаря на новой схеме
 	store, err := NewStorage(":memory:", testLogger())
 	if err != nil {
 		t.Fatalf("NewStorage failed: %v", err)
@@ -95,6 +97,95 @@ func TestMigrateRejectsFutureSchemaVersion(t *testing.T) {
 	if !strings.Contains(err.Error(), "новее поддерживаемой") {
 		t.Fatalf("Migrate error = %v, want future version message", err)
 	}
+}
+
+func TestMigrateDropsDeprecatedCommunityBanVotingTables(t *testing.T) {
+	// проверка обновления схемы версии 6 после удаления voting-таблиц
+	store, err := NewStorage(":memory:", testLogger())
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+	t.Cleanup(func() {
+		store.Close()
+	})
+
+	for version := 1; version <= 6; version++ {
+		migrationFile := fmt.Sprintf("migrations/%03d_", version)
+		entries, readDirErr := migrationsFS.ReadDir("migrations")
+		if readDirErr != nil {
+			t.Fatalf("read migrations dir failed: %v", readDirErr)
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), fmt.Sprintf("%03d_", version)) {
+				migrationFile = "migrations/" + entry.Name()
+				break
+			}
+		}
+
+		content, readFileErr := migrationsFS.ReadFile(migrationFile)
+		if readFileErr != nil {
+			t.Fatalf("read migration %d failed: %v", version, readFileErr)
+		}
+		if _, execErr := store.DB().Exec(string(content)); execErr != nil {
+			t.Fatalf("apply migration %d failed: %v", version, execErr)
+		}
+		if _, execErr := store.DB().Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); execErr != nil {
+			t.Fatalf("set user_version %d failed: %v", version, execErr)
+		}
+	}
+
+	_, err = store.DB().Exec(`
+		INSERT INTO moderation_case (chat_id, spam_message_id, suspect_user_id, log_chat_id)
+		VALUES (-100001, 10, 20, -100777)
+	`)
+	if err != nil {
+		t.Fatalf("insert moderation_case failed: %v", err)
+	}
+	_, err = store.DB().Exec(`
+		INSERT INTO moderation_vote (case_id, voter_user_id)
+		VALUES (1, 30)
+	`)
+	if err != nil {
+		t.Fatalf("insert moderation_vote failed: %v", err)
+	}
+
+	if err := Migrate(store.DB(), testLogger()); err != nil {
+		t.Fatalf("Migrate from version 6 failed: %v", err)
+	}
+
+	for _, tableName := range []string{"moderation_case", "moderation_vote"} {
+		if sqliteTableExists(t, store.DB(), tableName) {
+			t.Fatalf("таблица %s должна быть удалена миграцией 007", tableName)
+		}
+	}
+	for _, tableName := range []string{"chat_config", "action_log", "bot_delete_rule"} {
+		if !sqliteTableExists(t, store.DB(), tableName) {
+			t.Fatalf("таблица %s должна сохраниться после миграции 007", tableName)
+		}
+	}
+
+	var userVersion int
+	if err := store.DB().QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+		t.Fatalf("read user_version failed: %v", err)
+	}
+	if userVersion != 7 {
+		t.Fatalf("user_version = %d, want 7", userVersion)
+	}
+}
+
+func sqliteTableExists(t *testing.T, db *sql.DB, tableName string) bool {
+	t.Helper()
+
+	var exists int
+	err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+	`, tableName).Scan(&exists)
+	if err != nil {
+		t.Fatalf("check table %s failed: %v", tableName, err)
+	}
+	return exists > 0
 }
 
 func TestNewStorage_AppliesSQLitePragmas(t *testing.T) {
@@ -334,69 +425,6 @@ func TestSetSpamLogChatID(t *testing.T) {
 	}
 	if cfg.SpamLogChatID != targetChatID {
 		t.Errorf("SpamLogChatID = %d, want %d", cfg.SpamLogChatID, targetChatID)
-	}
-}
-
-func TestModerationCaseLifecycle(t *testing.T) {
-	store := setupTestDB(t)
-	chatID := int64(-100001)
-	spamMessageID := int64(500)
-	suspectUserID := int64(700)
-	logChatID := int64(-100777)
-
-	caseItem, err := store.CreateModerationCase(chatID, spamMessageID, suspectUserID, logChatID)
-	if err != nil {
-		t.Fatalf("CreateModerationCase failed: %v", err)
-	}
-	if caseItem == nil {
-		t.Fatal("ожидался созданный moderation case")
-	}
-	if caseItem.Status != CommunityBanStatusOpen {
-		t.Errorf("Status = %q, want %q", caseItem.Status, CommunityBanStatusOpen)
-	}
-
-	err = store.SetModerationCaseMessages(caseItem.ID, 1001, 1002)
-	if err != nil {
-		t.Fatalf("SetModerationCaseMessages failed: %v", err)
-	}
-
-	stored, err := store.GetModerationCase(caseItem.ID)
-	if err != nil {
-		t.Fatalf("GetModerationCase failed: %v", err)
-	}
-	if !stored.BotReplyMessageID.Valid || stored.BotReplyMessageID.Int64 != 1001 {
-		t.Fatalf("BotReplyMessageID = %+v, want 1001", stored.BotReplyMessageID)
-	}
-	if !stored.LogReportMessageID.Valid || stored.LogReportMessageID.Int64 != 1002 {
-		t.Fatalf("LogReportMessageID = %+v, want 1002", stored.LogReportMessageID)
-	}
-
-	votes, added, err := store.AddModerationVote(caseItem.ID, 1)
-	if err != nil {
-		t.Fatalf("AddModerationVote failed: %v", err)
-	}
-	if !added || votes != 1 {
-		t.Fatalf("AddModerationVote first = (%d, %v), want (1, true)", votes, added)
-	}
-
-	votes, added, err = store.AddModerationVote(caseItem.ID, 1)
-	if err != nil {
-		t.Fatalf("AddModerationVote duplicate failed: %v", err)
-	}
-	if added || votes != 1 {
-		t.Fatalf("AddModerationVote duplicate = (%d, %v), want (1, false)", votes, added)
-	}
-
-	err = store.MarkModerationCaseBanned(caseItem.ID)
-	if err != nil {
-		t.Fatalf("MarkModerationCaseBanned failed: %v", err)
-	}
-	stored, err = store.GetModerationCase(caseItem.ID)
-	if err != nil {
-		t.Fatalf("GetModerationCase failed: %v", err)
-	}
-	if stored.Status != CommunityBanStatusBanned {
-		t.Errorf("Status = %q, want %q", stored.Status, CommunityBanStatusBanned)
 	}
 }
 
