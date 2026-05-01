@@ -23,6 +23,8 @@ type Config struct {
 	DBPath string
 	// MaxMessageAgeSec — порог пропуска старых сообщений в секундах (FR-011, по умолчанию 30).
 	MaxMessageAgeSec int
+	// AutoDeleteSpamMessageSec — автоудаление спам-сообщения через N секунд (0 = выключено).
+	AutoDeleteSpamMessageSec int
 }
 
 // ErrMissingEnv возвращается когда обязательная переменная окружения не задана.
@@ -76,6 +78,20 @@ func Load() (*Config, error) {
 			return nil, errors.New("MAX_MESSAGE_AGE_SEC должен быть числом")
 		}
 		cfg.MaxMessageAgeSec = age
+	}
+
+	autoDeleteSpamMsgStr := os.Getenv("AUTO_DELETE_SPAM_MESSAGE_SEC")
+	if autoDeleteSpamMsgStr == "" {
+		cfg.AutoDeleteSpamMessageSec = 0
+	} else {
+		ttl, err := strconv.Atoi(autoDeleteSpamMsgStr)
+		if err != nil {
+			return nil, errors.New("AUTO_DELETE_SPAM_MESSAGE_SEC должен быть числом")
+		}
+		if ttl < 0 {
+			return nil, errors.New("AUTO_DELETE_SPAM_MESSAGE_SEC не может быть отрицательным")
+		}
+		cfg.AutoDeleteSpamMessageSec = ttl
 	}
 
 	return cfg, nil

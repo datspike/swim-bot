@@ -690,6 +690,10 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 		}
 	}
 
+	if b.spamDeleteTTL > 0 {
+		b.scheduleSpamMessageDelete(chatID, msg.ID)
+	}
+
 	ctx := b.detectContext(chatID, msg.Sender.ID, cfg)
 
 	logErr := b.storage.InsertActionLog(chatID, msg.Sender.ID, int64(msg.ID), replyMsgID, ctx, result.Action)
@@ -729,6 +733,20 @@ func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
 			return b.bot.Delete(replyMsg)
 		}, b.logger); err != nil {
 			b.logger.Warn("spam warning reply delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
+		}
+	})
+}
+
+func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int) {
+	time.AfterFunc(b.spamDeleteTTL, func() {
+		spamMsg := &tele.Message{
+			ID:   messageID,
+			Chat: &tele.Chat{ID: chatID},
+		}
+		if err := withRetry(func() error {
+			return b.bot.Delete(spamMsg)
+		}, b.logger); err != nil {
+			b.logger.Warn("spam message delete failed", "chat_id", chatID, "message_id", messageID, "error", err)
 		}
 	})
 }
