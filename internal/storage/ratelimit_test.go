@@ -93,6 +93,85 @@ func TestMarkKicked(t *testing.T) {
 	}
 }
 
+func TestListKickedSpamCounterUsers_ReturnsOnlyTargetDateKickedUsers(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+	otherChatID := int64(-100002)
+	targetDate := "2026-05-01"
+	otherDate := "2026-04-30"
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_, _ = store.UpsertTrackedBot(otherChatID, "spambot")
+	insertSpamCounter(t, store, chatID, 1001, targetDate, true)
+	insertSpamCounter(t, store, chatID, 1002, targetDate, false)
+	insertSpamCounter(t, store, chatID, 1003, otherDate, true)
+	insertSpamCounter(t, store, otherChatID, 1004, targetDate, true)
+
+	userIDs, err := store.ListKickedSpamCounterUsers(chatID, targetDate)
+	if err != nil {
+		t.Fatalf("ListKickedSpamCounterUsers failed: %v", err)
+	}
+
+	expectedUserIDs := []int64{1001}
+	if len(userIDs) != len(expectedUserIDs) || userIDs[0] != expectedUserIDs[0] {
+		t.Fatalf("userIDs = %v, want %v", userIDs, expectedUserIDs)
+	}
+}
+
+func TestResetSpamCountersForDate_DeletesOnlyTargetDateAndChat(t *testing.T) {
+	store := setupTestDB(t)
+	chatID := int64(-100001)
+	otherChatID := int64(-100002)
+	targetDate := "2026-05-01"
+	otherDate := "2026-04-30"
+
+	_, _ = store.UpsertTrackedBot(chatID, "spambot")
+	_, _ = store.UpsertTrackedBot(otherChatID, "spambot")
+	insertSpamCounter(t, store, chatID, 1001, targetDate, true)
+	insertSpamCounter(t, store, chatID, 1002, targetDate, false)
+	insertSpamCounter(t, store, chatID, 1003, otherDate, true)
+	insertSpamCounter(t, store, otherChatID, 1004, targetDate, true)
+
+	affected, err := store.ResetSpamCountersForDate(chatID, targetDate)
+	if err != nil {
+		t.Fatalf("ResetSpamCountersForDate failed: %v", err)
+	}
+	if affected != 2 {
+		t.Fatalf("affected = %d, want 2", affected)
+	}
+
+	remaining := countSpamCounters(t, store)
+	if remaining != 2 {
+		t.Fatalf("remaining counters = %d, want 2", remaining)
+	}
+}
+
+func insertSpamCounter(t *testing.T, store *Storage, chatID, userID int64, date string, kicked bool) {
+	t.Helper()
+
+	kickedValue := 0
+	if kicked {
+		kickedValue = 1
+	}
+	_, err := store.DB().Exec(`
+		INSERT INTO spam_counter (chat_id, user_id, date, count, effective_limit, kicked)
+		VALUES (?, ?, ?, 1, 4, ?)
+	`, chatID, userID, date, kickedValue)
+	if err != nil {
+		t.Fatalf("insert spam_counter failed: %v", err)
+	}
+}
+
+func countSpamCounters(t *testing.T, store *Storage) int {
+	t.Helper()
+
+	var count int
+	if err := store.DB().QueryRow("SELECT COUNT(*) FROM spam_counter").Scan(&count); err != nil {
+		t.Fatalf("count spam_counter failed: %v", err)
+	}
+	return count
+}
+
 func TestUpdateRateLimitConfig(t *testing.T) {
 	store := setupTestDB(t)
 	chatID := int64(-100001)

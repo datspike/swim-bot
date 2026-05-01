@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"time"
 )
 
 // GetOrCreateSpamCounter возвращает счётчик спама пользователя за текущие сутки (UTC).
@@ -94,13 +95,46 @@ func (s *Storage) SetTestMode(chatID int64, enabled bool) error {
 	return nil
 }
 
+// ListKickedSpamCounterUsers возвращает пользователей с дневным ограничением за дату.
+func (s *Storage) ListKickedSpamCounterUsers(chatID int64, date string) ([]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT user_id
+		FROM spam_counter
+		WHERE chat_id = ? AND date = ? AND kicked = 1
+		ORDER BY user_id
+	`, chatID, date)
+	if err != nil {
+		return nil, errors.Join(errors.New("не удалось получить пользователей с ограничениями"), err)
+	}
+	defer rows.Close()
+
+	userIDs := make([]int64, 0)
+	for rows.Next() {
+		var userID int64
+		if scanErr := rows.Scan(&userID); scanErr != nil {
+			return nil, errors.Join(errors.New("не удалось прочитать пользователя с ограничением"), scanErr)
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Join(errors.New("не удалось прочитать список пользователей с ограничениями"), err)
+	}
+
+	return userIDs, nil
+}
+
 // ResetSpamCounters сбрасывает все счётчики спама для чата за сегодня.
 // Используется в тестовом режиме для повторного тестирования.
 func (s *Storage) ResetSpamCounters(chatID int64) (int64, error) {
+	return s.ResetSpamCountersForDate(chatID, time.Now().UTC().Format(time.DateOnly))
+}
+
+// ResetSpamCountersForDate сбрасывает счётчики спама для чата за указанную дату.
+func (s *Storage) ResetSpamCountersForDate(chatID int64, date string) (int64, error) {
 	result, err := s.db.Exec(`
 		DELETE FROM spam_counter
-		WHERE chat_id = ? AND date = date('now')
-	`, chatID)
+		WHERE chat_id = ? AND date = ?
+	`, chatID, date)
 	if err != nil {
 		return 0, errors.Join(errors.New("не удалось сбросить счётчики"), err)
 	}

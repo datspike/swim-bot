@@ -13,7 +13,16 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-const spamReplyAutoDeleteTTL = time.Minute
+const (
+	spamReplyAutoDeleteTTL     = time.Minute
+	unrestrictStatusClearDelay = 70 * time.Second
+)
+
+type resetRestrictionsResult struct {
+	Candidates int
+	Succeeded  int
+	Failed     int
+}
 
 // handleStart обрабатывает команду /start.
 func (b *Bot) handleStart(c tele.Context) error {
@@ -82,7 +91,7 @@ func (b *Bot) handleHelp(c tele.Context) error {
   Пример: /testmode -100123456789 on
 
 /resetcounters <chat_id> [force=on]
-  Сбрасывает дневные spam-счётчики в чате.
+  Сбрасывает дневные spam-счётчики и снимает выданные ботом дневные ограничения.
   По умолчанию доступно только в test mode.
   force=on — разрешает сброс вне test mode и отправляет уведомление в чат.
   Пример: /resetcounters -100123456789 force=on
@@ -439,7 +448,7 @@ func validateRateLimitConfig(daily, rbSize, rbThreshold int) error {
 }
 
 // handleResetCounters обрабатывает команду /resetcounters <chat_id> [force=on].
-// Сбрасывает все спам-счётчики за сегодня. По умолчанию только в тестовом режиме.
+// Сбрасывает дневные спам-счётчики и снимает выданные ботом ограничения.
 // При force=on можно сбрасывать всегда.
 func (b *Bot) handleResetCounters(c tele.Context) error {
 	args := c.Args()
@@ -485,9 +494,18 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		return c.Send("Сброс счётчиков доступен только в тестовом режиме.")
 	}
 
-	affected, err := b.storage.ResetSpamCounters(chatID)
+	resetDate := time.Now().UTC().Format(time.DateOnly)
+	kickedUsers, err := b.storage.ListKickedSpamCounterUsers(chatID, resetDate)
 	if err != nil {
-		b.logger.Error("reset counters failed", "chat_id", chatID, "error", err)
+		b.logger.Error("list kicked spam counter users failed", "chat_id", chatID, "date", resetDate, "error", err)
+		return c.Send("Не удалось получить список ограничений для сброса.")
+	}
+
+	restrictions := b.unrestrictUsers(chatID, kickedUsers)
+
+	affected, err := b.storage.ResetSpamCountersForDate(chatID, resetDate)
+	if err != nil {
+		b.logger.Error("reset counters failed", "chat_id", chatID, "date", resetDate, "error", err)
 		return c.Send("Не удалось сбросить счётчики.")
 	}
 
@@ -496,8 +514,81 @@ func (b *Bot) handleResetCounters(c tele.Context) error {
 		b.logger.Warn("reset counters notify failed", "chat_id", chatID, "error", sendErr)
 	}
 
-	b.logger.Info("counters reset", "chat_id", chatID, "affected", affected, "by_user", c.Sender().ID, "force", forceReset)
-	return c.Send(fmt.Sprintf("Сброшено %d счётчиков для чата %d", affected, chatID))
+	b.logger.Info(
+		"counters reset",
+		"chat_id", chatID,
+		"date", resetDate,
+		"affected", affected,
+		"unrestrict_candidates", restrictions.Candidates,
+		"unrestrict_succeeded", restrictions.Succeeded,
+		"unrestrict_failed", restrictions.Failed,
+		"by_user", c.Sender().ID,
+		"force", forceReset,
+	)
+	return c.Send(formatResetCountersResponse(affected, chatID, restrictions))
+}
+
+// buildUnrestrictChatMember создаёт параметры снятия дневных ограничений пользователя.
+func buildUnrestrictChatMember(userID int64) *tele.ChatMember {
+	rights := tele.NoRestrictions()
+	rights.Independent = true
+
+	return &tele.ChatMember{
+		User:   &tele.User{ID: userID},
+		Rights: rights,
+		// Telegram оставляет status=restricted при until_date=0, поэтому даём короткий срок.
+		RestrictedUntil: time.Now().Add(unrestrictStatusClearDelay).Unix(),
+	}
+}
+
+// unrestrictUser снимает Telegram-ограничения пользователя с retry при FloodError.
+func (b *Bot) unrestrictUser(chatID, userID int64) error {
+	return withRetry(func() error {
+		return b.bot.Restrict(&tele.Chat{ID: chatID}, buildUnrestrictChatMember(userID))
+	}, b.logger)
+}
+
+// unrestrictUsers снимает ограничения с кандидатов и продолжает при частичных ошибках.
+func (b *Bot) unrestrictUsers(chatID int64, userIDs []int64) resetRestrictionsResult {
+	uniqueUserIDs := uniqueInt64s(userIDs)
+	result := resetRestrictionsResult{Candidates: len(uniqueUserIDs)}
+
+	for _, userID := range uniqueUserIDs {
+		if err := b.unrestrictUser(chatID, userID); err != nil {
+			result.Failed++
+			b.logger.Warn("unrestrict user failed", "chat_id", chatID, "user_id", userID, "error", err)
+			continue
+		}
+		result.Succeeded++
+	}
+
+	return result
+}
+
+// uniqueInt64s возвращает список чисел без повторов с сохранением порядка.
+func uniqueInt64s(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	uniqueValues := make([]int64, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		uniqueValues = append(uniqueValues, value)
+	}
+	return uniqueValues
+}
+
+// formatResetCountersResponse формирует сводку сброса для администратора.
+func formatResetCountersResponse(affected, chatID int64, restrictions resetRestrictionsResult) string {
+	return fmt.Sprintf(
+		"Сброшено %d счётчиков для чата %d. Ограничения: найдено %d, снято %d, ошибок %d.",
+		affected,
+		chatID,
+		restrictions.Candidates,
+		restrictions.Succeeded,
+		restrictions.Failed,
+	)
 }
 
 // handleSetCommunityBan обрабатывает команду /setcommunityban <chat_id> on|off.

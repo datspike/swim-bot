@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/datspike/swim-bot/internal/storage"
 
@@ -356,5 +358,55 @@ func TestShouldDeleteBotMessage_ZeroTTLIgnored(t *testing.T) {
 
 	if shouldDeleteBotMessage(msg, rule) {
 		t.Fatal("не ожидалось автоудаление при ttl=0")
+	}
+}
+
+func TestUniqueInt64s_RemovesDuplicatesKeepsOrder(t *testing.T) {
+	values := []int64{1001, 1002, 1001, 1003, 1002}
+
+	got := uniqueInt64s(values)
+	want := []int64{1001, 1002, 1003}
+	if len(got) != len(want) {
+		t.Fatalf("uniqueInt64s() = %v, want %v", got, want)
+	}
+	for index, expectedValue := range want {
+		if got[index] != expectedValue {
+			t.Fatalf("uniqueInt64s() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBuildUnrestrictChatMember_AllowsOtherMessagesIndependently(t *testing.T) {
+	userID := int64(1001)
+	before := time.Now().Add(unrestrictStatusClearDelay - time.Second).Unix()
+
+	member := buildUnrestrictChatMember(userID)
+	after := time.Now().Add(unrestrictStatusClearDelay + time.Second).Unix()
+
+	if member.User == nil || member.User.ID != userID {
+		t.Fatalf("User.ID = %v, want %d", member.User, userID)
+	}
+	if !member.CanSendOther {
+		t.Fatal("CanSendOther = false, want true")
+	}
+	if !member.Independent {
+		t.Fatal("Independent = false, want true")
+	}
+	if member.RestrictedUntil < before || member.RestrictedUntil > after {
+		t.Fatalf("RestrictedUntil = %d, want between %d and %d", member.RestrictedUntil, before, after)
+	}
+}
+
+func TestFormatResetCountersResponse_IncludesResetAndRestrictionCounts(t *testing.T) {
+	response := formatResetCountersResponse(3, -100001, resetRestrictionsResult{
+		Candidates: 2,
+		Succeeded:  1,
+		Failed:     1,
+	})
+
+	for _, expectedText := range []string{"Сброшено 3", "чата -100001", "найдено 2", "снято 1", "ошибок 1"} {
+		if !strings.Contains(response, expectedText) {
+			t.Fatalf("response = %q, want substring %q", response, expectedText)
+		}
 	}
 }
