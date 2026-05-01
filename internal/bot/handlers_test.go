@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/datspike/swim-bot/internal/storage"
+
+	tele "gopkg.in/telebot.v3"
 )
 
 // testLogger создаёт тестовый логгер.
@@ -232,6 +234,49 @@ func TestValidateRateLimitConfig(t *testing.T) {
 			err := validateRateLimitConfig(tt.daily, tt.rbSize, tt.rbThreshold)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateRateLimitConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestShouldDeleteAdminSpam(t *testing.T) {
+	tests := []struct {
+		name   string
+		role   tele.MemberStatus
+		ttlSec int
+		want   bool
+	}{
+		{
+			name:   "administrator with ttl",
+			role:   tele.Administrator,
+			ttlSec: 60,
+			want:   true,
+		},
+		{
+			name:   "creator with ttl",
+			role:   tele.Creator,
+			ttlSec: 60,
+			want:   true,
+		},
+		{
+			name:   "administrator without ttl",
+			role:   tele.Administrator,
+			ttlSec: 0,
+			want:   false,
+		},
+		{
+			name:   "member with ttl",
+			role:   tele.Member,
+			ttlSec: 60,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldDeleteAdminSpam(tt.role, tt.ttlSec)
+			if got != tt.want {
+				t.Fatalf("shouldDeleteAdminSpam(%q, %d) = %v, want %v", tt.role, tt.ttlSec, got, tt.want)
 			}
 		})
 	}

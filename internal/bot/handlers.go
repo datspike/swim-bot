@@ -706,7 +706,14 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		b.logger.Warn("admin check failed in spam detection, skipping", "chat_id", chatID, "user_id", msg.Sender.ID, "error", err)
 		return nil
 	}
-	if adminMember.Role == tele.Administrator || adminMember.Role == tele.Creator {
+	if isChatAdmin(adminMember.Role) {
+		if shouldDeleteAdminSpam(adminMember.Role, cfg.SpamDeleteTTLSec) {
+			ttl := time.Duration(cfg.SpamDeleteTTLSec) * time.Second
+			b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
+			b.logger.Info("admin spam delete scheduled",
+				"chat_id", chatID, "user_id", msg.Sender.ID,
+				"message_id", msg.ID, "ttl_sec", cfg.SpamDeleteTTLSec)
+		}
 		return nil
 	}
 
@@ -799,6 +806,16 @@ func (b *Bot) sendReply(c tele.Context, msg *tele.Message, text string) *tele.Me
 
 func shouldAutoDeleteSpamReply(text string) bool {
 	return strings.Contains(text, "Вы можете поплавать ещё")
+}
+
+// isChatAdmin проверяет роль администратора или владельца чата.
+func isChatAdmin(role tele.MemberStatus) bool {
+	return role == tele.Administrator || role == tele.Creator
+}
+
+// shouldDeleteAdminSpam проверяет необходимость удаления спама от админа.
+func shouldDeleteAdminSpam(role tele.MemberStatus, ttlSec int) bool {
+	return isChatAdmin(role) && ttlSec > 0
 }
 
 func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
