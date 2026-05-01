@@ -70,6 +70,10 @@ func (b *Bot) handleHelp(c tele.Context) error {
 Показать состояние community-ban и log chat.
 Пример: /communitybanstatus -100123456789
 
+/setspamdelete <chat_id> <seconds>
+Настроить автоудаление спам-сообщений via tracked bot (0 = выключено).
+Пример: /setspamdelete -100123456789 60
+
 Как узнать chat_id:
 1. Добавь @raw_data_bot в чат
 2. Отправь любое сообщение
@@ -566,6 +570,42 @@ func (b *Bot) handleCommunityBanStatus(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Community-ban для чата %d:\n- статус: %s\n- log chat: %s", chatID, status, logChat))
 }
 
+// handleSetSpamDelete обрабатывает команду /setspamdelete <chat_id> <seconds>.
+func (b *Bot) handleSetSpamDelete(c tele.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("Использование: /setspamdelete <chat_id> <seconds>")
+	}
+	chatID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return c.Send("Неверный chat_id. Используй числовой ID чата.")
+	}
+	ttlSec, err := strconv.Atoi(args[1])
+	if err != nil || ttlSec < 0 {
+		return c.Send("Неверный seconds. Укажи целое число >= 0.")
+	}
+
+	member, err := c.Bot().ChatMemberOf(&tele.Chat{ID: chatID}, c.Sender())
+	if err != nil {
+		b.logger.Warn("setspamdelete admin check failed", "chat_id", chatID, "user_id", c.Sender().ID, "error", err)
+		return c.Send(fmt.Sprintf("Не удалось проверить права. Возможно, я не добавлен в чат %d.", chatID))
+	}
+	if member.Role != tele.Administrator && member.Role != tele.Creator {
+		return c.Send(fmt.Sprintf("Ты не администратор чата %d.", chatID))
+	}
+
+	if err := b.storage.SetSpamDeleteTTL(chatID, ttlSec); err != nil {
+		b.logger.Error("set spam delete ttl failed", "chat_id", chatID, "ttl_sec", ttlSec, "error", err)
+		return c.Send("Не удалось обновить TTL автоудаления.")
+	}
+
+	b.logger.Info("spam delete ttl updated", "chat_id", chatID, "ttl_sec", ttlSec, "by_user", c.Sender().ID)
+	if ttlSec == 0 {
+		return c.Send(fmt.Sprintf("Автоудаление спам-сообщений для чата %d выключено.", chatID))
+	}
+	return c.Send(fmt.Sprintf("Автоудаление спам-сообщений для чата %d: %d сек.", chatID, ttlSec))
+}
+
 // handleMessage — единый роутер для всех типов сообщений.
 // Групповые сообщения -> спам-детекция.
 func (b *Bot) handleMessage(c tele.Context) error {
@@ -690,8 +730,14 @@ func (b *Bot) handleSpam(c tele.Context, msg *tele.Message, cfg *storage.ChatCon
 		}
 	}
 
-	if b.spamDeleteTTL > 0 {
-		b.scheduleSpamMessageDelete(chatID, msg.ID)
+	ttl := b.spamDeleteTTL
+	if cfg.SpamDeleteTTLSec > 0 {
+		ttl = time.Duration(cfg.SpamDeleteTTLSec) * time.Second
+	} else if cfg.SpamDeleteTTLSec == 0 {
+		ttl = 0
+	}
+	if ttl > 0 {
+		b.scheduleSpamMessageDelete(chatID, msg.ID, ttl)
 	}
 
 	ctx := b.detectContext(chatID, msg.Sender.ID, cfg)
@@ -737,8 +783,8 @@ func (b *Bot) scheduleSpamReplyDelete(chatID int64, messageID int) {
 	})
 }
 
-func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int) {
-	time.AfterFunc(b.spamDeleteTTL, func() {
+func (b *Bot) scheduleSpamMessageDelete(chatID int64, messageID int, ttl time.Duration) {
+	time.AfterFunc(ttl, func() {
 		spamMsg := &tele.Message{
 			ID:   messageID,
 			Chat: &tele.Chat{ID: chatID},

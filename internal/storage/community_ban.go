@@ -75,6 +75,22 @@ func (s *Storage) SetSpamLogChatID(chatID, targetChatID int64) error {
 	return nil
 }
 
+// SetSpamDeleteTTL настраивает per-chat TTL автоудаления спам-сообщений (0 = выключено).
+func (s *Storage) SetSpamDeleteTTL(chatID int64, ttlSec int) error {
+	if err := s.EnsureChatConfig(chatID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		UPDATE chat_config
+		SET spam_delete_ttl_sec = ?, updated_at = datetime('now')
+		WHERE chat_id = ?
+	`, ttlSec, chatID)
+	if err != nil {
+		return errors.Join(errors.New("не удалось обновить ttl автоудаления спама"), err)
+	}
+	return nil
+}
+
 // CreateModerationCase создаёт новый кейс или возвращает существующий.
 func (s *Storage) CreateModerationCase(chatID, spamMessageID, suspectUserID, logChatID int64) (*ModerationCase, error) {
 	_, err := s.db.Exec(`
