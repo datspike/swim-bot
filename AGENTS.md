@@ -20,6 +20,7 @@
 - Если правка затрагивает стиль, логирование или error handling, дополнительно прогоняй `golangci-lint run`.
 - Используй структурированные `slog`-логи; не добавляй `fmt.Print*` в runtime-код.
 - Учитывай, что миграции применяются при старте процесса: изменение SQL и storage-кода требует проверки startup path, а не только unit tests.
+- Для новых commit message используй Conventional Commits: `type(scope): summary`, например `fix(bot): skip repeated restrict` или `docs(readme): document setup`.
 
 ## Конфигурация и секреты
 - Локальный пример env лежит в `.env.example`.
