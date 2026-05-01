@@ -27,22 +27,12 @@ func Run(ctx context.Context) error {
 	logger := setupLogger(cfg.LogLevel)
 	logger.Info("запуск swim-bot", "log_level", cfg.LogLevel)
 
-	// подключение к БД
-	store, err := storage.NewStorage(cfg.DBPath, logger)
+	// подготовка БД к runtime-работе
+	store, err := storage.OpenRuntime(cfg.DBPath, logger)
 	if err != nil {
-		return fmt.Errorf("не удалось подключиться к БД: %w", err)
+		return fmt.Errorf("не удалось подготовить БД: %w", err)
 	}
 	defer store.Close()
-
-	// миграции
-	if migrateErr := storage.Migrate(store.DB(), logger); migrateErr != nil {
-		return fmt.Errorf("не удалось выполнить миграции: %w", migrateErr)
-	}
-
-	// активация чатов с tracked_bot, ожидавших стикер
-	if activateErr := store.ActivateConfiguredChats(); activateErr != nil {
-		return fmt.Errorf("не удалось активировать настроенные чаты: %w", activateErr)
-	}
 
 	// создание бота
 	telegramBot, err := bot.New(buildBotConfig(cfg, store, logger))
