@@ -163,6 +163,21 @@ func (b *Bot) handleSpamDetection(c tele.Context) error {
 		return nil
 	}
 
+	if isMTSQuestionnaireSpamCandidate(msg) {
+		adminMember, adminErr := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
+		if adminErr != nil {
+			b.logger.Warn("mts questionnaire spam admin check failed", "chat_id", chatID, "user_id", msg.Sender.ID, "error", adminErr)
+			return nil
+		}
+		if !isChatAdmin(adminMember.Role) {
+			b.logger.Info("spam detected",
+				"chat_id", chatID, "user_id", msg.Sender.ID,
+				"trigger", "mts_questionnaire", "message_id", msg.ID,
+				"test_mode", cfg.TestMode)
+			return b.handleMTSQuestionnaireSpam(c, msg, cfg)
+		}
+	}
+
 	if cfg.CommunityBanEnabled && isCommunityBanCandidate(msg) {
 		adminMember, adminErr := c.Bot().ChatMemberOf(c.Chat(), msg.Sender)
 		if adminErr != nil {
