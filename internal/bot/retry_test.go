@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 func TestWithRetry_ImmediateSuccess(t *testing.T) {

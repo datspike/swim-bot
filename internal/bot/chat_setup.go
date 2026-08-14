@@ -9,7 +9,7 @@ import (
 	"github.com/datspike/swim-bot/internal/chatconfig"
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 const unrestrictStatusClearDelay = 70 * time.Second

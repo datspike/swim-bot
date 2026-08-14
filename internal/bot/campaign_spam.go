@@ -5,19 +5,20 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/datspike/swim-bot/internal/bot/richcontent"
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // isMTSQuestionnaireSpamCandidate распознаёт сообщения кампании «МТС + опрос + ссылка».
-// Ссылки проверяются по entities, поэтому правило видит и URL, скрытые rich formatting.
+// Правило проверяет обычные entities и нативное дерево Telegram RichMessage.
 func isMTSQuestionnaireSpamCandidate(msg *tele.Message) bool {
 	if msg == nil || msg.Sender == nil || msg.Sender.IsBot || msg.Via != nil || msg.IsForwarded() {
 		return false
 	}
 
-	text := strings.ToLower(strings.TrimSpace(msg.Text + "\n" + msg.Caption))
+	text := strings.ToLower(strings.TrimSpace(msg.Text + "\n" + msg.Caption + "\n" + richcontent.Text(msg.RichMessage)))
 	return containsSpamToken(text, "мтс") &&
 		containsSpamToken(text, "опрос") &&
 		messageHasLinkEntity(msg)
@@ -35,11 +36,14 @@ func containsSpamToken(text, prefix string) bool {
 }
 
 func messageHasLinkEntity(msg *tele.Message) bool {
-	return entitiesHaveLink(msg.Entities) || entitiesHaveLink(msg.CaptionEntities)
+	return entitiesHaveLink(msg.Entities) ||
+		entitiesHaveLink(msg.CaptionEntities) ||
+		richcontent.HasLink(msg.RichMessage)
 }
 
 func entitiesHaveLink(entities tele.Entities) bool {
-	for _, entity := range entities {
+	for i := range entities {
+		entity := &entities[i]
 		if entity.Type == tele.EntityURL {
 			return true
 		}

@@ -7,7 +7,7 @@ import (
 	"github.com/datspike/swim-bot/internal/bot/webhook"
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // defaultMaxMessageAge — максимальный возраст сообщения для обработки (FR-011).

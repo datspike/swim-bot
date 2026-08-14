@@ -5,14 +5,14 @@ import (
 
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 func TestIsCommunityBanCandidate(t *testing.T) {
 	msg := &tele.Message{
 		Sender: &tele.User{ID: 1},
 		Chat:   &tele.Chat{ID: -100, Type: tele.ChatSuperGroup},
-		ExternalReplyInfo: &tele.ExternalReplyInfo{
+		ExternalReply: &tele.ExternalReply{
 			Chat: &tele.Chat{ID: -200, Type: tele.ChatChannel},
 		},
 		Quote: &tele.TextQuote{Text: "vpn ad"},
@@ -27,7 +27,7 @@ func TestIsCommunityBanCandidateRejectsForwardAndVia(t *testing.T) {
 	msg := &tele.Message{
 		Sender: &tele.User{ID: 1},
 		Chat:   &tele.Chat{ID: -100, Type: tele.ChatSuperGroup},
-		ExternalReplyInfo: &tele.ExternalReplyInfo{
+		ExternalReply: &tele.ExternalReply{
 			Chat: &tele.Chat{ID: -200, Type: tele.ChatChannel},
 		},
 		Quote:        &tele.TextQuote{Text: "vpn ad"},
@@ -44,7 +44,7 @@ func TestIsCommunityBanCandidateRejectsNonChannelOrigin(t *testing.T) {
 	msg := &tele.Message{
 		Sender: &tele.User{ID: 1},
 		Chat:   &tele.Chat{ID: -100, Type: tele.ChatSuperGroup},
-		ExternalReplyInfo: &tele.ExternalReplyInfo{
+		ExternalReply: &tele.ExternalReply{
 			Chat: &tele.Chat{ID: -200, Type: tele.ChatSuperGroup},
 		},
 		Quote: &tele.TextQuote{Text: "quote"},
@@ -60,7 +60,7 @@ func TestShouldCommunityBan(t *testing.T) {
 	candidate := &tele.Message{
 		Sender: &tele.User{ID: 1},
 		Chat:   &tele.Chat{ID: -100, Type: tele.ChatSuperGroup},
-		ExternalReplyInfo: &tele.ExternalReplyInfo{
+		ExternalReply: &tele.ExternalReply{
 			Chat: &tele.Chat{ID: -200, Type: tele.ChatChannel},
 		},
 		Quote: &tele.TextQuote{Text: "vpn ad"},

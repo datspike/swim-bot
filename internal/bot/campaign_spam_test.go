@@ -3,7 +3,7 @@ package bot
 import (
 	"testing"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 func TestIsMTSQuestionnaireSpamCandidate(t *testing.T) {
@@ -32,6 +32,23 @@ func TestIsMTSQuestionnaireSpamCandidate(t *testing.T) {
 					Type: tele.EntityTextLink,
 					URL:  "https://clck.su/mtsopros",
 				}},
+			},
+			want: true,
+		},
+		{
+			name: "native rich message",
+			msg: &tele.Message{
+				Sender: &tele.User{ID: 1},
+				RichMessage: &tele.RichMessage{Blocks: []tele.RichBlock{{
+					Type: tele.RichBlockTable,
+					Cells: [][]tele.RichBlockTableCell{{{Text: &tele.RichText{
+						Kind: tele.RichTextArray,
+						Parts: []tele.RichText{
+							{Kind: tele.RichTextPlain, Plain: "Абонентам МТС доступен опрос: "},
+							{Kind: tele.RichTextEntity, Type: tele.RichURL, URL: "https://clck.su/opros", Text: &tele.RichText{Kind: tele.RichTextPlain, Plain: "clck.su/opros"}},
+						},
+					}}}},
+				}}},
 			},
 			want: true,
 		},

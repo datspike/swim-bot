@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // withRetry повторяет fn при получении tele.FloodError, ожидая RetryAfter секунд.

@@ -20,7 +20,7 @@
 ## Стек
 
 - Go `1.25.6`
-- `gopkg.in/telebot.v3`
+- `gopkg.in/telebot.v4`
 - SQLite через `modernc.org/sqlite`
 - systemd для production-процесса
 - GitHub Actions для сборки и деплоя бинарника
@@ -191,7 +191,7 @@ Community-ban — отдельный механизм для подозрите�
 
 - отправлено не ботом;
 - не является `via_bot` и не является forward;
-- содержит `ExternalReplyInfo` и `Quote`;
+- содержит `ExternalReply` и `Quote`;
 - origin chat цитаты — канал.
 
 Если community-ban включён и отправитель не администратор:

@@ -10,7 +10,7 @@ import (
 
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // testLogger создаёт тестовый логгер.

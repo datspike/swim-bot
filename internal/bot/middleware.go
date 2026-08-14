@@ -4,7 +4,7 @@ package bot
 import (
 	"log/slog"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // AdminOnly middleware проверяет, что отправитель является администратором указанного чата.

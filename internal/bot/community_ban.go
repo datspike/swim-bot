@@ -8,7 +8,7 @@ import (
 
 	"github.com/datspike/swim-bot/internal/storage"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // isCommunityBanCandidate проверяет, что сообщение — ответ с цитатой из канала.
@@ -19,13 +19,13 @@ func isCommunityBanCandidate(msg *tele.Message) bool {
 	if msg.Via != nil || msg.IsForwarded() {
 		return false
 	}
-	if msg.ExternalReplyInfo == nil || msg.Quote == nil {
+	if msg.ExternalReply == nil || msg.Quote == nil {
 		return false
 	}
 
-	originChat := msg.ExternalReplyInfo.Chat
-	if originChat == nil && msg.ExternalReplyInfo.Origin != nil {
-		originChat = msg.ExternalReplyInfo.Origin.Chat
+	originChat := msg.ExternalReply.Chat
+	if originChat == nil && msg.ExternalReply.Origin != nil {
+		originChat = msg.ExternalReply.Origin.Chat
 	}
 	if originChat == nil {
 		return false

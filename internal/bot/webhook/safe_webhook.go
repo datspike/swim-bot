@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 // defaultReadHeaderTimeout ограничивает чтение HTTP-заголовков webhook-запроса.
@@ -162,5 +162,6 @@ func (h *SafeWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	normalizeRichMessages(&update)
 	h.dest <- update
 }

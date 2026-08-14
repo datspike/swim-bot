@@ -2,7 +2,7 @@
 
 ## Что это за репозиторий
 - `swim-bot` — Telegram anti-spam bot на Go.
-- Runtime stack: Go `1.25.6`, `gopkg.in/telebot.v3`, SQLite через `modernc.org/sqlite`.
+- Runtime stack: Go `1.25.6`, `gopkg.in/telebot.v4`, SQLite через `modernc.org/sqlite`.
 - Бот работает через webhook HTTP endpoint, а не через long polling.
 - SQLite schema migrates on startup from embedded SQL in `internal/storage/migrations`.
 

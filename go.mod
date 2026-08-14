@@ -3,7 +3,7 @@ module github.com/datspike/swim-bot
 go 1.25.6
 
 require (
-	gopkg.in/telebot.v3 v3.3.8
+	gopkg.in/telebot.v4 v4.0.0-beta.10
 	modernc.org/sqlite v1.45.0
 )
 
